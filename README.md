@@ -1,5 +1,5 @@
 <p align='center'>
-    <img src='./assets/comu-logo.png' width='420'/>
+    <img src='./assets/comu-logo.png' width='400'/>
 </p>
 
 ## μcomp-lang
