@@ -1,6 +1,6 @@
-<center>
+<p align='center'>
     <img src='./assets/comu-logo.png' width='420'/>
-</center>
+</p>
 
 ## μcomp-lang
 
