@@ -1,6 +1,6 @@
-<center>
-    <img src='./assets/comu-logo.png' width='420'/>
-</center>
+<p align='center'>
+    <img src='./assets/comu-logo.png' width='400'/>
+</p>
 
 ## μcomp-lang
 
@@ -27,3 +27,7 @@ component EntryPoint provides App {
 }
 
 ```
+
+#### Trivia
+
+The mascotte's name is "*Comu*" = "🐄" + "μ" (I know, it's a bad pun).
