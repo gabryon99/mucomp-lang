@@ -97,6 +97,7 @@
 %nonassoc O_REF
 %nonassoc L_SQUARE
 
+
 /* Start symbol */
 %start compilation_unit
 %type <Ast.located_compilation_unit> compilation_unit 
@@ -242,13 +243,16 @@ expr:
   | n = INT { Ast.make_node (Ast.ILiteral(n)) (Location.to_code_position $loc) }
   | b = BOOL { Ast.make_node (Ast.BLiteral(b)) (Location.to_code_position $loc) }
   | c = CHAR { Ast.make_node (Ast.CLiteral(c)) (Location.to_code_position $loc) }
-  | L_PAREN; e = expr; R_PAREN { e }
+  | e = delimited(L_PAREN, expr, R_PAREN) { e }
  
   | lv = l_value; {
     Ast.make_node (Ast.LV(lv)) (Location.to_code_position $loc)
   }
   | lv = l_value; O_ASSIGN; e = expr {
     Ast.make_node (Ast.Assign(lv, e)) (Location.to_code_position $loc)
+  }
+  | O_REF; lv = l_value; {
+    Ast.make_node (Ast.Address(lv)) (Location.to_code_position $loc)
   }
 
   | M_MINUS; e = expr; %prec U_MINUS {
