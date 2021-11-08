@@ -61,7 +61,7 @@ and 'a lvalue_node =
 and 'a stmt = ('a stmt_node, 'a) annotated_node
 
 and 'a stmt_node =
-  | If of 'a expr * 'a stmt * 'a stmt (* Conditional *)
+  | If of 'a expr * 'a stmt * 'a stmt option (* Conditional *)
   | While of 'a expr * 'a stmt (* While loop *)
   | Expr of 'a expr (* Expression statement e; *)
   | Return of 'a expr option (* Return statement *)
@@ -131,3 +131,8 @@ type located_compilation_unit = Location.code_pos compilation_unit
 
 type typed_compilation_unit = typ compilation_unit
 [@@deriving show, ord, eq]
+
+let make_node a b = { node = a; annot = b}
+let make_fun_decl rtype fname formals body = {
+  rtype = rtype; fname = fname; formals = formals; body = body
+}

@@ -1,7 +1,7 @@
 {
   (* OCaml declaration*)   
   open Parser
-  exception Lexing_error of Lexing.position * string
+  exception Lexing_error of Location.lexeme_pos * string    
 
   let create_hashtable size init =
     let tbl = Hashtbl.create size in
@@ -33,17 +33,17 @@
     Check if the identifier length is no more than 64 characters,
     otherwise raise a Lexing_error exception.
   *)
-  let check_identifier id pos = 
+  let check_identifier id lexbuf = 
     if String.length id < max_id_length then 
       ID(id) 
     else 
       let msg = Printf.sprintf "The identifier \"%s\" must be < %d characters!\n" id max_id_length in
-      raise (Lexing_error (pos, msg))
+      raise (Lexing_error (Location.to_lexeme_position lexbuf, msg))
   
-  let check_num_int32 num pos =
+  let check_num_int32 num lexbuf =
     if num > max_int || num < min_int then
       let msg = Printf.sprintf "The number \"%d\" is not a 32 bit integer!\n" num in 
-      raise (Lexing_error (pos, msg))
+      raise (Lexing_error (Location.to_lexeme_position lexbuf, msg))
     else
       INT(num)
   
@@ -57,30 +57,31 @@ let hex_number = ['-']?"0x"['0' - '9' 'a' - 'f' 'A' - 'F']+
 
 let identifier = ['_']?['a' - 'z' 'A' - 'Z']['0' - '9' 'a' - 'z' 'A' - 'Z']*
 
-(* TODO: handle escape characters *)
-let characters = 
-  ['\'']['a' - 'z' 'A' - 'Z' '0' - '9']['\'']
-
 (* Declaration of scanner functions *)
 
 
 rule next_token = parse
 
+  | [' ']
+  | ['\t']
+  | ['\n']                 { next_token lexbuf }
+
   (* Primitives *)
   | hex_number
   | dec_number as num   { 
                           let n = int_of_string num in 
-                          check_num_int32 n (Lexing.lexeme_start_p lexbuf)
+                          check_num_int32 n lexbuf
                         }
 
   | identifier as id    { 
                           try
-                            let token = Hastbl.find keywords_table id in
+                            Printf.printf "Id: %s\n" (id);
+                            let token = Hashtbl.find keywords_table id in
                             token
                           with Not_found ->
-                            check_identifier id (Lexing.lexeme_start_p lexbuf)
+                            check_identifier id lexbuf
                         }
-  | characters as c     { CHAR(c) }
+  | [''']               { character ' ' lexbuf }
   
   | "true"              { BOOL(true) }
   | "false"             { BOOL(false) }
@@ -113,8 +114,8 @@ rule next_token = parse
   | '('                 { L_PAREN }
   | ')'                 { R_PAREN }
 
-  | '{'                 { L_BRACKET }
-  | '}'                 { R_BRACKET }
+  | '{'                 { Printf.printf "{\n"; L_BRACKET }
+  | '}'                 { Printf.printf "}\n"; R_BRACKET }
 
   | '['                 { L_SQUARE }
   | ']'                 { R_SQUARE }
@@ -122,7 +123,7 @@ rule next_token = parse
   | '.'                 { DOT }
   | ','                 { COMMA }
   | ':'                 { COLON }
-  | ';'                 { SEMICOLON }
+  | ';'                 { Printf.printf ";\n"; SEMICOLON }
   | "<-"                { LINK }
 
   (* Comments *)
@@ -131,15 +132,14 @@ rule next_token = parse
 
   | eof                 { EOF }
 
-  | _                   { failwith "Not implemented yet" }
+  | _ as c                  { Printf.printf "Unmatched: %c" c ;failwith "Not implemented yet" }
 
 and comments = parse
-  | _                   { comment_single_line lexbuf }
+  | _                   { comments lexbuf }
   | "*/"
   | ['\n']              { next_token lexbuf }
+and character c = parse
+  | [''']               { CHAR(c) }
+  | ['a' - 'z' 'A' - 'Z' '0' - '9'] as c { character c lexbuf }
 
-{
-  let _ = 
-    let lexbuf = Lexing.from_channel stdin in 
-    next_token lexbuf
-}
+{}
