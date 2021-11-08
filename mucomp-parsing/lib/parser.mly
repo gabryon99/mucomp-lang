@@ -167,10 +167,11 @@ var_sign:
 ;
 
 fun_proto:
-  | K_DEF; fn_name = ID; L_PAREN; fp = separated_list(COMMA, var_sign); R_PAREN; COLON; bt = option(basic_type) {
-      match bt with 
-      | None -> Ast.make_fun_decl Ast.TVoid fn_name fp None
-      | Some(t) -> Ast.make_fun_decl t fn_name fp None
+  | K_DEF; fn_name = ID; L_PAREN; fp = separated_list(COMMA, var_sign); R_PAREN {
+    Ast.make_fun_decl Ast.TVoid fn_name fp None
+  }
+  | K_DEF; fn_name = ID; L_PAREN; fp = separated_list(COMMA, var_sign); R_PAREN; COLON; bt = basic_type {
+    Ast.make_fun_decl bt fn_name fp None
   }
 ;
 
