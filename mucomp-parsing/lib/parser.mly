@@ -92,6 +92,8 @@
 %left     M_PLUS M_MINUS
 %left     M_TIMES M_DIV M_MOD
 
+%nonassoc U_MINUS
+
 %nonassoc O_REF
 %nonassoc L_SQUARE
 
@@ -213,6 +215,9 @@ basic_type:
 ;
 
 stmt:
+  | SEMICOLON {
+    Ast.make_node (Ast.Skip) (Location.to_code_position $loc)
+  }
   | K_RETURN; e = expr; SEMICOLON {
     Ast.make_node (Ast.Return(Some e)) (Location.to_code_position $loc)
   }
@@ -244,6 +249,10 @@ expr:
   }
   | lv = l_value; O_ASSIGN; e = expr {
     Ast.make_node (Ast.Assign(lv, e)) (Location.to_code_position $loc)
+  }
+
+  | M_MINUS; e = expr; %prec U_MINUS {
+    Ast.make_node (Ast.UnaryOp(Ast.Neg, e)) (Location.to_code_position $loc)
   }
 
   | e1 = expr; M_PLUS; e2 = expr {
