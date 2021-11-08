@@ -30,4 +30,4 @@ component EntryPoint provides App {
 
 #### Trivia
 
-The mascotte's name is "*Comu*" = "🐄" + "μ" (I know, it's a bad pun).
+The mascotte's name is "*Comu*" = "🐄" + "μ" (like: "muuuh") (I know, it's a bad pun).
