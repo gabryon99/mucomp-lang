@@ -92,7 +92,7 @@
 %left     M_PLUS M_MINUS
 %left     M_TIMES M_DIV M_MOD
 
-%nonassoc U_MINUS
+%nonassoc U_MINUS U_NOT
 
 %nonassoc O_REF
 %nonassoc L_SQUARE
@@ -253,6 +253,9 @@ expr:
 
   | M_MINUS; e = expr; %prec U_MINUS {
     Ast.make_node (Ast.UnaryOp(Ast.Neg, e)) (Location.to_code_position $loc)
+  }
+  | L_NOT; e = expr; %prec U_NOT {
+    Ast.make_node (Ast.UnaryOp(Ast.Not, e)) (Location.to_code_position $loc)
   }
 
   | e1 = expr; M_PLUS; e2 = expr {
