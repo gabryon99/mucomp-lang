@@ -16,6 +16,7 @@ let handle_error source lexeme_pos msg =
     Bytes.to_string s
 
 let process_source filename = 
+  Printf.printf "[i] Starting parsing process of file: \"%s\"\n" filename;
   let source = load_file filename in 
   let lexbuf = Lexing.from_string ~with_positions:true source in 
   try
@@ -23,7 +24,10 @@ let process_source filename =
     Parsing.parse Scanner.next_token |>
     Ast.show_located_compilation_unit |> 
     Printf.printf "Parsing succeded!\n\n%s\n"   
-  with 
+  with
+  | Parser.Error ->
+    Printf.fprintf stderr "[X] Something went wrong while parsing the program...\n";
+    Printf.fprintf stderr "[X] Lexbuf status: %s" (Location.show_lexeme_pos (Location.to_lexeme_position lexbuf));
   | Scanner.Lexing_error (pos, msg)
   | Parsing.Syntax_error (pos,msg) -> 
     handle_error source pos msg

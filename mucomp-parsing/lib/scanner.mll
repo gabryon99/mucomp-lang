@@ -8,7 +8,7 @@
     List.iter (fun (key, data) -> Hashtbl.add tbl key data) init;
     tbl
 
-  let keywords_table = create_hashtable 16 [
+  let keywords_table = create_hashtable 15 [
     ("var",       K_VAR);
     ("def",       K_DEF);
     ("uses",      K_USES);
@@ -16,7 +16,7 @@
     ("char",      K_CHAR);
     ("bool",      K_BOOL);
     ("void",      K_VOID);
-    ("for",       K_FOR);
+    (*("for",       K_FOR);*)
     ("while",     K_WHILE);
     ("if",        K_IF);
     ("else",      K_ELSE);
@@ -75,7 +75,6 @@ rule next_token = parse
 
   | identifier as id    { 
                           try
-                            Printf.printf "Id: %s\n" (id);
                             let token = Hashtbl.find keywords_table id in
                             token
                           with Not_found ->
@@ -114,8 +113,8 @@ rule next_token = parse
   | '('                 { L_PAREN }
   | ')'                 { R_PAREN }
 
-  | '{'                 { Printf.printf "{\n"; L_BRACKET }
-  | '}'                 { Printf.printf "}\n"; R_BRACKET }
+  | '{'                 { L_BRACKET }
+  | '}'                 { R_BRACKET }
 
   | '['                 { L_SQUARE }
   | ']'                 { R_SQUARE }
@@ -123,7 +122,7 @@ rule next_token = parse
   | '.'                 { DOT }
   | ','                 { COMMA }
   | ':'                 { COLON }
-  | ';'                 { Printf.printf ";\n"; SEMICOLON }
+  | ';'                 { SEMICOLON }
   | "<-"                { LINK }
 
   (* Comments *)
@@ -132,7 +131,7 @@ rule next_token = parse
 
   | eof                 { EOF }
 
-  | _ as c                  { Printf.printf "Unmatched: %c" c ;failwith "Not implemented yet" }
+  | _ as c              { Printf.printf "Unmatched: %c\n" c; raise (Lexing_error((Location.to_lexeme_position lexbuf), "Not implemented yet")) }
 
 and comments = parse
   | _                   { comments lexbuf }

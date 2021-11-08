@@ -30,7 +30,7 @@
 %token K_VOID
 
 (* Flow control *)
-%token K_FOR
+// Not used right now: %token K_FOR
 %token K_WHILE
 
 %token K_IF
@@ -107,8 +107,8 @@
 
 /* Grammar Specification */
 compilation_unit:
-  | ifaces = list(interface); comps = list(component); cons = connection EOF { 
-      Ast.CompilationUnit({interfaces = ifaces; components = comps; connections = cons})
+  | ifaces = list(interface); comps = list(component); conns = flatten(list(connection)); EOF { 
+      Ast.CompilationUnit({interfaces = ifaces; components = comps; connections = conns})
   }                   
 ;
 
@@ -129,9 +129,9 @@ connection:
   | K_CONNECT; l = link; SEMICOLON {
     [l]
   }
-  | K_CONNECT; L_BRACKET; links = separated_list(SEMICOLON, link); R_BRACKET {
-    links
-  }
+  | K_CONNECT; L_BRACKET; l = separated_list(SEMICOLON, link) R_BRACKET {
+    l
+  } 
 ;
 
 
