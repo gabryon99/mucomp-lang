@@ -183,10 +183,9 @@ c_member_decl:
   }
 ;
 
-(* TODO: fix body *)
 fun_decl:
-  | fun_proto; block {
-    Ast.make_fun_decl (Ast.TInt) ("temp") ([]) (None)
+  | fp = fun_proto; b = block {
+    Ast.make_fun_decl (fp.Ast.rtype) (fp.Ast.fname) (fp.Ast.formals) (Some b)
   }
 ;
 
@@ -260,6 +259,10 @@ expr:
   }
   | L_NOT; e = expr; %prec U_NOT {
     Ast.make_node (Ast.UnaryOp(Ast.Not, e)) (Location.to_code_position $loc)
+  }
+
+  | fname = ID; L_PAREN; exp_list = separated_list(COMMA, expr); R_PAREN {
+    Ast.make_node (Ast.Call(None, fname, exp_list)) (Location.to_code_position $loc)
   }
 
   | e1 = expr; M_PLUS; e2 = expr {
