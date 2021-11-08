@@ -163,12 +163,11 @@ var_sign:
   | id = ID; COLON; t = lang_type { (id, t) }
 ;
 
-(* TODO: paramaters decl *)
 fun_proto:
-  | K_DEF; fn_name = ID; L_PAREN; R_PAREN; COLON; bt = option(basic_type) {
+  | K_DEF; fn_name = ID; L_PAREN; fp = separated_list(COMMA, var_sign); R_PAREN; COLON; bt = option(basic_type) {
       match bt with 
-      | None -> Ast.make_fun_decl Ast.TVoid fn_name [] None
-      | Some(t) -> Ast.make_fun_decl t fn_name [] None
+      | None -> Ast.make_fun_decl Ast.TVoid fn_name fp None
+      | Some(t) -> Ast.make_fun_decl t fn_name fp None
   }
 ;
 
