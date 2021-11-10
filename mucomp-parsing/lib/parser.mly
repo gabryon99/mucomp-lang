@@ -30,7 +30,7 @@
 %token K_VOID
 
 (* Flow control *)
-// Not used right now: %token K_FOR
+%token K_FOR
 %token K_WHILE
 
 %token K_IF
@@ -216,26 +216,24 @@ basic_type:
 ;
 
 stmt:
-  | SEMICOLON {
-    Ast.make_node (Ast.Skip) (Location.to_code_position $loc)
-  }
-  | K_RETURN; e = expr; SEMICOLON {
-    Ast.make_node (Ast.Return(Some e)) (Location.to_code_position $loc)
-  }
-  | K_RETURN; SEMICOLON {
-    Ast.make_node (Ast.Return(None)) (Location.to_code_position $loc)
+  | K_RETURN; e = option(expr); SEMICOLON {
+    Ast.make_node (Ast.Return(e)) (Location.to_code_position $loc)
   }
   | e = expr; SEMICOLON {
     Ast.make_node (Ast.Expr(e)) (Location.to_code_position $loc)
   }
+  | b = block { b }
   | K_WHILE; e = delimited(L_PAREN, expr, R_PAREN); s = stmt {
     Ast.make_node (Ast.While(e, s)) (Location.to_code_position $loc)
   }
   | K_IF; e = delimited(L_PAREN, expr, R_PAREN); s = stmt %prec K_IF {
-    Ast.make_node (Ast.If(e, s, None)) (Location.to_code_position $loc)
+    Ast.make_node (Ast.If(e, s, Ast.make_node (Ast.Skip) (Location.to_code_position $loc))) (Location.to_code_position $loc)
   }
   | K_IF; e = delimited(L_PAREN, expr, R_PAREN); s1 = stmt; K_ELSE; s2 = stmt {
-    Ast.make_node (Ast.If(e, s1, Some s2)) (Location.to_code_position $loc)
+    Ast.make_node (Ast.If(e, s1, s2)) (Location.to_code_position $loc)
+  }
+  | K_FOR; L_PAREN; e1 = option(expr); SEMICOLON; e2 = option(expr); SEMICOLON; e3 = option(expr); R_PAREN; s = stmt {
+      Ast.make_node (Ast.For(e1, e2, e3, s)) (Location.to_code_position $loc)
   }
 ;
 

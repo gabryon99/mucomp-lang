@@ -8,7 +8,7 @@
     List.iter (fun (key, data) -> Hashtbl.add tbl key data) init;
     tbl
 
-  let keywords_table = create_hashtable 15 [
+  let keywords_table = create_hashtable 16 [
     ("var",       K_VAR);
     ("def",       K_DEF);
     ("uses",      K_USES);
@@ -16,7 +16,7 @@
     ("char",      K_CHAR);
     ("bool",      K_BOOL);
     ("void",      K_VOID);
-    (*("for",       K_FOR);*)
+    ("for",       K_FOR);
     ("while",     K_WHILE);
     ("if",        K_IF);
     ("else",      K_ELSE);
@@ -63,8 +63,8 @@ let identifier = ['_']?['a' - 'z' 'A' - 'Z']['0' - '9' 'a' - 'z' 'A' - 'Z']*
 rule next_token = parse
 
   | [' ']
-  | ['\t']
-  | ['\n']                 { next_token lexbuf }
+  | ['\t'] { next_token lexbuf }
+  | ['\n'] | "\r\n"     { Lexing.new_line lexbuf; next_token lexbuf}
 
   (* Primitives *)
   | hex_number
