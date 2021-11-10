@@ -311,4 +311,8 @@ expr:
 
 l_value:
   | id = ID { Ast.make_node (Ast.AccVar(None, id)) (Location.to_code_position $loc) }
+  | id = ID; L_SQUARE; e = expr; R_SQUARE {
+    let n = Ast.make_node(Ast.AccVar(None, id)) (Location.to_code_position $loc) in
+    Ast.make_node(Ast.AccIndex(n, e)) (Location.to_code_position $loc)
+  }
 ;
