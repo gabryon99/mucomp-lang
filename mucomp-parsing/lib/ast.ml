@@ -61,8 +61,9 @@ and 'a lvalue_node =
 and 'a stmt = ('a stmt_node, 'a) annotated_node
 
 and 'a stmt_node =
-  | If of 'a expr * 'a stmt * 'a stmt option (* Conditional *)
+  | If of 'a expr * 'a stmt * 'a stmt (* Conditional *)
   | While of 'a expr * 'a stmt (* While loop *)
+  | For of 'a expr option * 'a expr option * 'a expr option * 'a stmt (* For loop *)
   | Expr of 'a expr (* Expression statement e; *)
   | Return of 'a expr option (* Return statement *)
   | Block of 'a stmtordec list (* Block: grouping and scope *)
