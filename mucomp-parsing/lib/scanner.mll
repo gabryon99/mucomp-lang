@@ -64,7 +64,9 @@ rule next_token = parse
 
   | [' ']
   | ['\t'] { next_token lexbuf }
-  | ['\n'] | "\r\n"     { Lexing.new_line lexbuf; next_token lexbuf}
+  
+  | ['\n'] 
+  | "\r\n"     { Lexing.new_line lexbuf; next_token lexbuf}
 
   (* Primitives *)
   | hex_number
@@ -139,6 +141,10 @@ and comments = parse
   | ['\n']              { next_token lexbuf }
 and character c = parse
   | [''']               { CHAR(c) }
-  | ['a' - 'z' 'A' - 'Z' '0' - '9'] as c { character c lexbuf }
+  | ['\\']['n']         { character '\n' lexbuf}
+  | ['\\']['t']         { character '\t' lexbuf}
+  | ['\\']['r']         { character '\r' lexbuf}
+  | [^'''] as c         { character c lexbuf }
+  | _                   { raise (Lexing_error((Location.to_lexeme_position lexbuf), "Unrecognized character!"))}
 
 {}

@@ -5,7 +5,7 @@ let handle_error source lexeme_pos msg =
   let line = List.nth lines (lexeme_pos.Location.line - 1) in
   let prefix = String.make (lexeme_pos.Location.start_column - 1) ' ' in 
   let middle = String.make (lexeme_pos.Location.end_column - lexeme_pos.Location.start_column + 1) '^' in 
-  Printf.eprintf "\n*** Error at line %d.\n%s\n%s%s\n*** %s\n\n" lexeme_pos.Location.line line prefix middle msg
+  Printf.eprintf "\n[❌] *** Error at line %d.\n%s\n%s%s\n*** %s\n\n" lexeme_pos.Location.line line prefix middle msg
 
   let load_file filename =
     let ic = open_in filename in 
@@ -16,18 +16,18 @@ let handle_error source lexeme_pos msg =
     Bytes.to_string s
 
 let process_source filename = 
-  Printf.printf "[i] Starting parsing process of file: \"%s\"\n" filename;
+  Printf.printf "[ℹ️] Starting parsing process of file: \"%s\"\n" filename;
   let source = load_file filename in 
   let lexbuf = Lexing.from_string ~with_positions:true source in 
   try
     lexbuf |>
     Parsing.parse Scanner.next_token |>
     Ast.show_located_compilation_unit |> 
-    Printf.printf "Parsing succeded!\n\n%s\n"   
+    Printf.printf "[✅] Parsing succeded!\n\n%s\n"   
   with
   | Parser.Error ->
-    Printf.fprintf stderr "[X] Something went wrong while parsing the program...\n";
-    Printf.fprintf stderr "[X] Lexbuf status: %s" (Location.show_lexeme_pos (Location.to_lexeme_position lexbuf));
+    Printf.fprintf stderr "[❌] Something went wrong while parsing the program...\n";
+    Printf.fprintf stderr "[❌] Lexbuf status: %s" (Location.show_lexeme_pos (Location.to_lexeme_position lexbuf));
   | Scanner.Lexing_error (pos, msg)
   | Parsing.Syntax_error (pos,msg) -> 
     handle_error source pos msg
