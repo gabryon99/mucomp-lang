@@ -38,7 +38,7 @@ type vdecl = identifier * typ [@@deriving show, ord, eq]
 type 'a expr = ('a expr_node, 'a) annotated_node
 
 and 'a expr_node =
-  | LV of 'a lvalue (* x or a[e] *)
+  | LV of 'a lvalue (* `x or a[e] *)
   | Assign of 'a lvalue * 'a expr (* x=e or a[e]=e *)
   | ILiteral of int (* Integer literal *)
   | CLiteral of char (* Char literal *)
@@ -77,7 +77,7 @@ and 'a stmtordec_node =
   | Stmt of 'a stmt (* A statement *)
 [@@deriving show, ord, eq]
 
-and 'a fun_decl = {
+and 'a fun_decl = { 
   rtype : typ;
   fname : identifier;
   formals : vdecl list;
@@ -119,6 +119,8 @@ and 'a component_decl_node =
 and connection = Link of identifier * identifier * identifier * identifier
 [@@deriving show, ord, eq]
 
+and 'a definition = ComponentDef of 'a component_decl | InterfaceDef of 'a interface_decl
+
 and 'a compilation_unit =
   | CompilationUnit of {
       interfaces : 'a interface_decl list;
@@ -134,6 +136,14 @@ type typed_compilation_unit = typ compilation_unit
 [@@deriving show, ord, eq]
 
 let make_node a b = { node = a; annot = b}
+
+let is_scalar_type = function
+  | TInt -> true
+  | TChar -> true 
+  | TBool -> true 
+  | _ -> false
+
 let make_fun_decl rtype fname formals body = {
   rtype = rtype; fname = fname; formals = formals; body = body
 }
+

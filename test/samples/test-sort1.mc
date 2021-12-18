@@ -10,7 +10,7 @@ interface Sorter {
 interface Comparator {
   def compare(n1 : int, n2 : int) : int;
 }
-
+ 
 component InsertionSort provides Sorter uses Comparator {
   def insertionSort(arr : int[], n : int){ 
       var i : int;
@@ -49,7 +49,7 @@ component CPrinter provides Printer {
   }
 }
 
-component EntryPoint provides App,Comparator uses Printer, Sorter {
+component EntryPoint provides App, Comparator uses Printer, Sorter {
 
   def compare(n1 : int, n2 : int) : int {
       return n1 - n2;

@@ -8,11 +8,10 @@
 /* Token declarations */
 %token EOF
 
+%token <string> ID
 %token <int> INT
 %token <char> CHAR 
 %token <bool> BOOL
-
-%token <string> ID
 
 (* Keywords *)
 
@@ -92,11 +91,7 @@
 %left     M_PLUS M_MINUS
 %left     M_TIMES M_DIV M_MOD
 
-%nonassoc U_MINUS U_NOT
-
-%nonassoc O_REF
-%nonassoc L_SQUARE
-
+%nonassoc U_NOT
 
 /* Start symbol */
 %start compilation_unit
@@ -107,36 +102,53 @@
 
 /* Grammar Specification */
 compilation_unit:
-  | ifaces = list(interface); comps = list(component); conns = flatten(list(connection)); EOF { 
-      Ast.CompilationUnit({interfaces = ifaces; components = comps; connections = conns})
-  }                   
+  | decls = top_decl* conns = flatten(connections*) EOF { 
+    
+    let rec build_compilation_unit interfaces components = function
+    | [] -> Ast.CompilationUnit({interfaces = interfaces; components = components; connections = conns})
+    | (Ast.InterfaceDef(iface_node))::t -> build_compilation_unit (iface_node::interfaces) components t
+    | (Ast.ComponentDef(comp_node))::t -> build_compilation_unit interfaces (comp_node::components) t
+    in
+    build_compilation_unit [] [] decls
+  }
 ;
 
+top_decl:
+  | interface  { Ast.InterfaceDef($1) }
+  | component  { Ast.ComponentDef($1) }
+
 interface:
-  | K_INTERFACE; iface_name = ID; L_BRACKET; decls = nonempty_list(i_member_decl); R_BRACKET {
+  | K_INTERFACE iface_name = ID decls = delimited(L_BRACKET, i_member_decl+, R_BRACKET) {
     Ast.make_node (Ast.InterfaceDecl({iname = iface_name; declarations = decls})) (Location.to_code_position $loc)
   }
 ;
 
 component:
-  | K_COMPONENT; comp_name = ID; pc = option(provide_clause); uc = option(use_clause); L_BRACKET; members = nonempty_list(c_member_decl); R_BRACKET {
-    let uses_decl = match uc with None -> [] | Some(c) -> c in 
+  | K_COMPONENT comp_name = ID pc = provide_clause? uc = use_clause? members = delimited(L_BRACKET, c_member_decl+, R_BRACKET) {
+    let uses_decl =     match uc with None -> [] | Some(c) -> c in 
     let provides_decl = match pc with None -> [] | Some(p) -> p in
     Ast.make_node (Ast.ComponentDecl({cname = comp_name; uses = uses_decl; provides = provides_decl; definitions = members })) (Location.to_code_position $loc)
   }
-
-connection:
-  | K_CONNECT; l = link; SEMICOLON {
-    [l]
-  }
-  | K_CONNECT; L_BRACKET; l = separated_list(SEMICOLON, link) R_BRACKET {
-    l
-  } 
 ;
 
+connections:
+  | K_CONNECT l = link SEMICOLON? {
+    [l]
+  }
+  | K_CONNECT L_BRACKET links R_BRACKET {
+    $3
+  }
+  | error {
+    failwith "Error while parsing `connect` ..."
+  }
+;
+
+links:
+| {[]}
+| l = link SEMICOLON ls = links { l::ls }
 
 link:
-  | c1 = ID; DOT; m1 = ID; LINK; c2 = ID; DOT; m2 = ID {
+  | c1 = ID DOT m1 = ID LINK c2 = ID DOT m2 = ID {
     Ast.Link(c1, m1, c2, m2)
   }
 ;
@@ -151,7 +163,7 @@ i_member_decl:
 ;
 
 provide_clause:
-  | K_PROVIDES; l = separated_list(COMMA, ID); {
+  | K_PROVIDES; l = separated_list(COMMA, ID) {
     l
   }
 ;
@@ -164,6 +176,9 @@ use_clause:
 
 var_sign:
   | id = ID; COLON; t = lang_type { (id, t) }
+  | error {
+    failwith "Unrecognized type"
+  }
 ;
 
 fun_proto:
@@ -191,22 +206,25 @@ fun_decl:
 ;
 
 block:
-  | L_BRACKET; l = list(block_element); R_BRACKET {
-    Ast.make_node (Ast.Block(l)) (Location.to_code_position $loc)
+  | elements = delimited(L_BRACKET, block_element*, R_BRACKET) {
+    Ast.make_node (Ast.Block(elements)) (Location.to_code_position $loc)
   }
 ;
 
 block_element:
   | s = stmt { Ast.make_node (Ast.Stmt(s)) (Location.to_code_position $loc) }
-  | K_VAR; vs = var_sign; SEMICOLON; { Ast.make_node (Ast.LocalDecl(vs)) (Location.to_code_position $loc) }
+  | K_VAR vs = var_sign SEMICOLON { Ast.make_node (Ast.LocalDecl(vs)) (Location.to_code_position $loc) }
 ;
 
 lang_type:
-  | t = basic_type { t }
-  | t = lang_type; L_SQUARE; R_SQUARE { Ast.TArray(t, None) }
-  | t = lang_type; L_SQUARE; size = INT; R_SQUARE { Ast.TArray(t, Some size) }
-  | O_REF; t = lang_type; %prec O_REF { Ast.TRef(t) }
+  | t = base_types { t }
+  | O_REF; t = base_types; { Ast.TRef(t) }
 ;
+
+base_types:
+  | t = basic_type { t }
+  | t = basic_type; L_SQUARE; R_SQUARE { Ast.TArray(t, None) }
+  | t = basic_type; L_SQUARE; size = INT; R_SQUARE { Ast.TArray(t, Some size) }
 
 basic_type:
   | K_INT   { Ast.TInt  }
@@ -216,23 +234,26 @@ basic_type:
 ;
 
 stmt:
-  | K_RETURN; e = option(expr); SEMICOLON {
+  | SEMICOLON {
+    Ast.make_node (Ast.Skip) (Location.to_code_position $loc)
+  }
+  | K_RETURN e = expr? SEMICOLON {
     Ast.make_node (Ast.Return(e)) (Location.to_code_position $loc)
   }
-  | e = expr; SEMICOLON {
+  | e = expr SEMICOLON {
     Ast.make_node (Ast.Expr(e)) (Location.to_code_position $loc)
   }
   | b = block { b }
-  | K_WHILE; e = delimited(L_PAREN, expr, R_PAREN); s = stmt {
+  | K_WHILE; e = delimited(L_PAREN, expr, R_PAREN) s = stmt {
     Ast.make_node (Ast.While(e, s)) (Location.to_code_position $loc)
   }
-  | K_IF; e = delimited(L_PAREN, expr, R_PAREN); s = stmt %prec K_IF {
+  | K_IF e = delimited(L_PAREN, expr, R_PAREN) s = stmt %prec K_IF {
     Ast.make_node (Ast.If(e, s, Ast.make_node (Ast.Skip) (Location.to_code_position $loc))) (Location.to_code_position $loc)
   }
-  | K_IF; e = delimited(L_PAREN, expr, R_PAREN); s1 = stmt; K_ELSE; s2 = stmt {
+  | K_IF e = delimited(L_PAREN, expr, R_PAREN) s1 = stmt K_ELSE s2 = stmt {
     Ast.make_node (Ast.If(e, s1, s2)) (Location.to_code_position $loc)
   }
-  | K_FOR; L_PAREN; e1 = option(expr); SEMICOLON; e2 = option(expr); SEMICOLON; e3 = option(expr); R_PAREN; s = stmt {
+  | K_FOR L_PAREN e1 = expr? SEMICOLON; e2 = expr? SEMICOLON e3 = expr? R_PAREN s = stmt {
       Ast.make_node (Ast.For(e1, e2, e3, s)) (Location.to_code_position $loc)
   }
 ;
@@ -253,65 +274,65 @@ expr:
     Ast.make_node (Ast.Address(lv)) (Location.to_code_position $loc)
   }
 
-  | M_MINUS; e = expr; %prec U_MINUS {
+  | M_MINUS e = expr {
     Ast.make_node (Ast.UnaryOp(Ast.Neg, e)) (Location.to_code_position $loc)
   }
-  | L_NOT; e = expr; %prec U_NOT {
+  | L_NOT e = expr %prec U_NOT {
     Ast.make_node (Ast.UnaryOp(Ast.Not, e)) (Location.to_code_position $loc)
   }
 
-  | fname = ID; L_PAREN; exp_list = separated_list(COMMA, expr); R_PAREN {
+  | fname = ID exp_list = delimited(L_PAREN, separated_list(COMMA, expr), R_PAREN) {
     Ast.make_node (Ast.Call(None, fname, exp_list)) (Location.to_code_position $loc)
   }
 
-  | e1 = expr; M_PLUS; e2 = expr {
+  | e1 = expr M_PLUS e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.Add, e1, e2)) (Location.to_code_position $loc)
   }
-  | e1 = expr; M_MINUS; e2 = expr {
+  | e1 = expr M_MINUS e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.Sub, e1, e2)) (Location.to_code_position $loc)
   }
-  | e1 = expr; M_TIMES; e2 = expr {
+  | e1 = expr M_TIMES e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.Mult, e1, e2)) (Location.to_code_position $loc)
   }
-  | e1 = expr; M_DIV; e2 = expr {
+  | e1 = expr M_DIV e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.Div, e1, e2)) (Location.to_code_position $loc)
   }
-  | e1 = expr; M_MOD; e2 = expr {
+  | e1 = expr M_MOD e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.Mod, e1, e2)) (Location.to_code_position $loc)
   }
 
-  | e1 = expr; L_AND_AND; e2 = expr {
+  | e1 = expr L_AND_AND e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.And, e1, e2)) (Location.to_code_position $loc)
   }
-  | e1 = expr; L_OR_OR; e2 = expr {
+  | e1 = expr L_OR_OR e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.Or, e1, e2)) (Location.to_code_position $loc)
   }
 
-  | e1 = expr; C_LT; e2 = expr {
+  | e1 = expr C_LT e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.Less, e1, e2)) (Location.to_code_position $loc)
   }
-  | e1 = expr; C_GT; e2 = expr {
+  | e1 = expr C_GT e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.Greater, e1, e2)) (Location.to_code_position $loc)
   }
 
-  | e1 = expr; C_LT_EQ; e2 = expr {
+  | e1 = expr C_LT_EQ e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.Leq, e1, e2)) (Location.to_code_position $loc)
   }
-  | e1 = expr; C_GT_EQ; e2 = expr {
+  | e1 = expr C_GT_EQ e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.Geq, e1, e2)) (Location.to_code_position $loc)
   }
 
-  | e1 = expr; C_EQ_EQ; e2 = expr {
+  | e1 = expr C_EQ_EQ e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.Equal, e1, e2)) (Location.to_code_position $loc)
   }
-  | e1 = expr; C_NOT_EQ; e2 = expr {
+  | e1 = expr C_NOT_EQ e2 = expr {
     Ast.make_node (Ast.BinaryOp(Ast.Neq, e1, e2)) (Location.to_code_position $loc)
   }
 ;
 
 l_value:
   | id = ID { Ast.make_node (Ast.AccVar(None, id)) (Location.to_code_position $loc) }
-  | id = ID; L_SQUARE; e = expr; R_SQUARE {
+  | id = ID L_SQUARE e = expr R_SQUARE {
     let n = Ast.make_node(Ast.AccVar(None, id)) (Location.to_code_position $loc) in
     Ast.make_node(Ast.AccIndex(n, e)) (Location.to_code_position $loc)
   }

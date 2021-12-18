@@ -8,7 +8,9 @@
     List.iter (fun (key, data) -> Hashtbl.add tbl key data) init;
     tbl
 
-  let keywords_table = create_hashtable 16 [
+  let keywords_table = create_hashtable 18 [
+    ("true",      BOOL(true));
+    ("false",     BOOL(false));
     ("var",       K_VAR);
     ("def",       K_DEF);
     ("uses",      K_USES);
@@ -52,21 +54,25 @@
 (* Declaration of regular expressions *)
 
 let digit = ['0' - '9']
-let dec_number = ['-']?digit+
-let hex_number = ['-']?"0x"['0' - '9' 'a' - 'f' 'A' - 'F']+
+let dec_number = digit+
+let hex_number = "0x"['0' - '9' 'a' - 'f' 'A' - 'F']+
 
-let identifier = ['_']?['a' - 'z' 'A' - 'Z']['0' - '9' 'a' - 'z' 'A' - 'Z']*
+let identifier = ['a' - 'z' 'A' - 'Z']['0' - '9' 'a' - 'z' 'A' - 'Z' '_']*
+
+let blank = [' ' '\t']
 
 (* Declaration of scanner functions *)
 
-
 rule next_token = parse
 
-  | [' ']
-  | ['\t'] { next_token lexbuf }
+  | blank       { next_token lexbuf }
   
   | ['\n'] 
   | "\r\n"     { Lexing.new_line lexbuf; next_token lexbuf}
+
+  (* Comments *)
+  | "//"                { let _ = single_line_comment lexbuf in next_token lexbuf }
+  | "/*"                { let _ = multi_line_comment lexbuf in next_token lexbuf }
 
   (* Primitives *)
   | hex_number
@@ -84,9 +90,6 @@ rule next_token = parse
                         }
   | [''']               { character ' ' lexbuf }
   
-  | "true"              { BOOL(true) }
-  | "false"             { BOOL(false) }
-
   (* Logical operators *)
   | ['!']               { L_NOT }
   | "&&"                { L_AND_AND }
@@ -127,18 +130,19 @@ rule next_token = parse
   | ';'                 { SEMICOLON }
   | "<-"                { LINK }
 
-  (* Comments *)
-  | "//"                { comments lexbuf }
-  | "/*"                { comments lexbuf }
-
   | eof                 { EOF }
 
-  | _ as c              { Printf.printf "Unmatched: %c\n" c; raise (Lexing_error((Location.to_lexeme_position lexbuf), "Not implemented yet")) }
+  | _ as c              { Printf.printf "Unmatched: %c\n" c; raise (Lexing_error((Location.to_lexeme_position lexbuf), "Unrecognized token!")) }
 
-and comments = parse
-  | _                   { comments lexbuf }
-  | "*/"
-  | ['\n']              { next_token lexbuf }
+and single_line_comment = parse
+  | "\r\n"
+  | "\n"                { Lexing.new_line lexbuf; () }
+  | _                   { single_line_comment lexbuf }
+and multi_line_comment = parse
+  | "*/"                { () }
+  | "\n"
+  | "\r\n"              { Lexing.new_line lexbuf; multi_line_comment lexbuf }
+  | _                   { multi_line_comment lexbuf }
 and character c = parse
   | [''']               { CHAR(c) }
   | ['\\']['n']         { character '\n' lexbuf}
