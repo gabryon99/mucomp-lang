@@ -15,9 +15,6 @@ let (@>) node annot = Ast.make_node node annot
 (** Function used inside pattern matching for cases that are not eligible *)
 let ignore () = failwith "Should not happen"
 
-let debug_global_table global_table =
-  Printf.printf "Summary Global Table: %s\n" (Symbol_table.show global_table)
-  
 (** The function performs semantic-rule checks as described by the specification. *)
 let first_pass ast global_table = 
   let load_prelude_interface prelude_name prelude_list global_table =
@@ -116,23 +113,48 @@ let first_pass ast global_table =
         match node with
         | Ast.FunDecl({Ast.rtype; fname; formals; _}) ->
           let aux_fold fsym_tbl (vid, vtyp) =
-            let vattr = {id = vid; loc = loc; typ = vtyp} in
-            let vsym = SVar({vattr = vattr}) in
-            Symbol_table.add_entry vid vsym fsym_tbl
+            (* TODO: type checking on formals *)
+            if Ast.equal_typ vtyp Ast.TVoid then
+              raise (Semantic_error(loc, "The formal parameter cannot be a void type!"))
+            else
+              let vattr = {id = vid; loc = loc; typ = vtyp} in
+              let vsym = SVar({vattr = vattr}) in
+              try
+                Symbol_table.add_entry vid vsym fsym_tbl
+              with Symbol_table.DuplicateEntry(_) ->
+                let msg = Printf.sprintf "Double formal parameter definition. The paramater `%s` is already defined inside the formals list." vid in 
+                raise (Semantic_error(loc, msg))
           in
           let formals_types = List.map (fun (_, t) -> t) formals in 
           let ftyp = Ast.TFun(formals_types, rtype) in
+          (* Let's check prelude function... *)
+          List.iter (fun (name, _) -> if (name = fname) then raise (Semantic_error(loc, "Cannot define the function since it is contained in the prelude!")) else ()) Mcomp_stdlib.prelude_signature;
           let fattr = {id = fname; loc = loc; typ = ftyp} in
           let fsym_tbl = Symbol_table.begin_block (Symbol_table.empty_table) in
           (* fill function symbol table with arguments... *)
           let fsym_tbl = List.fold_left aux_fold fsym_tbl formals in
           (* create new function symbol *)
           let fsym = SFunction({fattr = fattr; fsym_tbl = fsym_tbl}) in
-          visit_member_definitions (Symbol_table.add_entry fname fsym csym_tbl) tail
+          begin
+            try
+              visit_member_definitions (Symbol_table.add_entry fname fsym csym_tbl) tail
+            with Symbol_table.DuplicateEntry(_) ->
+              let msg = Printf.sprintf "Double function definition. The function `%s` was already defined in the current scope!" fname in
+              raise (Semantic_error(loc, msg))
+          end
         | Ast.VarDecl(vid, vtyp) ->
-          let vattr = {id = vid; loc = loc; typ = vtyp} in
-          let vsym = SVar({vattr = vattr}) in
-          visit_member_definitions (Symbol_table.add_entry vid vsym csym_tbl) tail 
+          begin
+            match vtyp with
+            | Ast.TVoid -> raise (Semantic_error(loc, "Variables cannot be declared of type void"))
+            | Ast.TArray(_, Some n) when n <= 0 -> raise (Semantic_error(loc, "Array size must be larger than 1!"))
+            | _ ->
+              let vattr = {id = vid; loc = loc; typ = vtyp} in
+              let vsym = SVar({vattr = vattr}) in
+              try
+                visit_member_definitions (Symbol_table.add_entry vid vsym csym_tbl) tail 
+              with Symbol_table.DuplicateEntry(_) ->
+                raise (Semantic_error(loc, "Double field variable declerations!"))
+          end
       in
       (* Create components attribute... *)
       let cattr = {id = cname; loc = loc; typ = Ast.TComponent(cname)} in
@@ -249,11 +271,19 @@ let first_pass ast global_table =
   in
   let rec link_connect_block global_table = function
   | [] -> global_table
+  | (Ast.Link(c1, _, c2, _))::_ when (c1 = "Prelude") || (c2 = "Prelude") ->
+    raise (Semantic_error(Location.dummy_code_pos, "Link to Prelude interface cannot be specified!"))
   | (Ast.Link(c1, i1, c2, i2))::tail -> 
     begin
       try 
-        let c1_sym = (match Symbol_table.lookup c1 global_table with SComponent(_) as c -> c | _ -> ignore ()) in 
-        let c2_sym = (match Symbol_table.lookup c2 global_table with SComponent(_) as c -> c | _ -> ignore ()) in 
+        let c1_sym = (match Symbol_table.lookup c1 global_table with 
+          | SComponent(_) as c -> c 
+          | SInterface({iattr = {id; _}; _}) -> raise (Semantic_error(Location.dummy_code_pos, (Printf.sprintf "Link invalid since %s is an interface!" id)))
+          | _ -> ignore ()) in 
+        let c2_sym = (match Symbol_table.lookup c2 global_table with 
+          | SComponent(_) as c -> c 
+          | SInterface({iattr = {id; _}; _}) -> raise (Semantic_error(Location.dummy_code_pos, (Printf.sprintf "Link invalid since %s is an interface!" id)))
+          | _ -> ignore ()) in 
         begin
           try
             let (c1_sym_cuses, c1_sym_cconect) = (match c1_sym with SComponent({cuses; cconnect; _}) -> (cuses, cconnect) | _ -> ignore ()) in
@@ -264,7 +294,7 @@ let first_pass ast global_table =
             let c1_sym_updated = (match c1_sym with SComponent(c) -> SComponent({c with cconnect = new_cconnect}) | _ -> ignore ()) in
             link_connect_block (Symbol_table.update_entry c1 c1_sym_updated global_table) tail
           with Symbol_table.MissingEntry(missing) ->
-            let msg = Printf.sprintf "Cannot find the decleration for interface `%s`!" missing in
+            let msg = Printf.sprintf "Cannot find the declaration for interface `%s`!" missing in
             raise (Semantic_error(Location.dummy_code_pos, msg))
         end
       with Symbol_table.MissingEntry(missing) ->
@@ -365,18 +395,18 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
   | Ast.Assign(lv, e) ->
     let _new_node_lv = _type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
     let _new_node_exp = _type_check_expr component_ast_node component_sym function_sym_tbl e in
+    Printf.printf "LV[%s] = EXP[%s]\n" (Ast.show_typ _new_node_lv.Ast.annot) (Ast.show_typ _new_node_exp.Ast.annot);
     begin
       match (_new_node_lv, _new_node_exp) with 
       (* Case: T1 <- T2 <== T1=T2 && Scalar(T1) *)
       | ({Ast.annot = t1; _}, {Ast.annot = t2; _}) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> (Ast.Assign(_new_node_lv, _new_node_exp)) @> Ast.TInt
-      (* Case: A[T1] <- T2 <== T1==T2 && Scalar(T1) *)
-      | ({Ast.annot = Ast.TArray(t1, _); _}, {Ast.annot = t2; _}) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> (Ast.Assign(_new_node_lv, _new_node_exp)) @> Ast.TInt
       (* Case: T1 <- &T1 <== Scalar(T1) *)
       | ({Ast.annot = t1; _}, {Ast.annot = Ast.TRef(t2); _}) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> (Ast.Assign(_new_node_lv, _new_node_exp)) @> Ast.TInt
       (* Case: &T1 <- &T2 <== T1==T2 && Scalar(T1) *)
       | ({Ast.annot = Ast.TRef(t1); _}, {Ast.annot = Ast.TRef(t2); _}) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> (Ast.Assign(_new_node_lv, _new_node_exp)) @> Ast.TInt
       (* Case: &T1 <- T2 <== T1==T2 && Scalar(T1) *)
       | ({Ast.annot = Ast.TRef(t1); _}, {Ast.annot = t2; _}) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> (Ast.Assign(_new_node_lv, _new_node_exp)) @> Ast.TInt
+      
       (* Error Cases *)
       | ({Ast.annot = Ast.TArray(_); _}, {Ast.annot = Ast.TArray(_); _}) -> raise (Semantic_error(loc, "Arrays cannot be assigned!"))
       | ({Ast.annot = _; _}, {Ast.annot = Ast.TVoid; _}) -> raise (Semantic_error(loc, "Cannot assign void to a variable!"))
@@ -541,6 +571,14 @@ and _type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_t
           | Ast.TBool -> (Ast.For(Some new_e1, Some new_e2, Some new_e3, new_for_stmt)) @> (Ast.TVoid)
           | _ -> raise (Semantic_error(loc, "The for guard is not a boolean expression!"))
         end
+      | (None, Some(e2), None) ->
+        let new_e2 = _type_check_expr component_ast_node component_sym function_sym_tbl e2 in
+        begin
+          match (new_e2.Ast.annot) with
+          | Ast.TBool -> (Ast.For(None, Some new_e2, None, new_for_stmt)) @> (Ast.TVoid)
+          | _ -> raise (Semantic_error(loc, "The for guard is not a boolean expression!"))
+        end
+      | (None, None, None) -> (Ast.For(None, None, None, new_for_stmt)) @> (Ast.TVoid)
       | _ -> ignore ()
     end
   | Ast.Return(None) -> (Ast.Return(None)) @> Ast.TVoid
@@ -569,7 +607,13 @@ and _type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_t
       let l = annotated_node.Ast.annot in
       match n with
       | Ast.LocalDecl(id, typ) -> 
-        Symbol_table.add_entry id (SVar({vattr = {id = id; loc = l; typ = typ}})) sym_tbl
+        begin
+          try
+            Symbol_table.add_entry id (SVar({vattr = {id = id; loc = l; typ = typ}})) sym_tbl
+          with Symbol_table.DuplicateEntry(_) ->
+            let msg = Printf.sprintf "The variable %s has been declared twice!" id in 
+            raise (Semantic_error(loc, msg))
+        end
       | _ -> sym_tbl
     in
     let sym_table = (Symbol_table.begin_block function_sym_tbl) in
@@ -631,5 +675,4 @@ let second_pass ast global_table =
 let type_check ast = 
   let global_table = Symbol_table.begin_block (Symbol_table.empty_table) in
   let global_table = first_pass ast global_table in
-  let _ = debug_global_table global_table in
   second_pass ast global_table
