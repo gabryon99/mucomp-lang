@@ -43,7 +43,7 @@
       raise (Lexing_error (Location.to_lexeme_position lexbuf, msg))
   
   let check_num_int32 num lexbuf =
-    if num > max_int || num < min_int then
+    if (abs num) > 0x7FFFFFFF then
       let msg = Printf.sprintf "The number \"%d\" is not a 32 bit integer!\n" num in 
       raise (Lexing_error (Location.to_lexeme_position lexbuf, msg))
     else
