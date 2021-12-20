@@ -140,11 +140,13 @@ rule next_token = parse
 and single_line_comment = parse
   | "\r\n"
   | "\n"                { Lexing.new_line lexbuf; () }
+  | eof                 { () }
   | _                   { single_line_comment lexbuf }
 and multi_line_comment = parse
   | "*/"                { () }
   | "\n"
   | "\r\n"              { Lexing.new_line lexbuf; multi_line_comment lexbuf }
+  | eof                 { () }
   | _                   { multi_line_comment lexbuf }
 and character c = parse
   | [''']               { CHAR(c) }
