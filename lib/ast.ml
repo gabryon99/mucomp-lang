@@ -15,6 +15,7 @@ type binop =
 [@@deriving show, ord, eq]
 
 type uop = Neg | Not [@@deriving show, ord, eq]
+type dop = MinMin | PlusPlus and dop_prec = Pre | Post [@@deriving show, ord, eq]
 
 type identifier = string [@@deriving show, ord, eq]
 
@@ -44,6 +45,7 @@ and 'a expr_node =
   | CLiteral of char (* Char literal *)
   | BLiteral of bool (* Bool literal *)
   | UnaryOp of uop * 'a expr (* Unary primitive operator *)
+  | DoubleOp of dop * dop_prec * 'a lvalue 
   | Address of 'a lvalue (* Address of a variable *)
   | BinaryOp of binop * 'a expr * 'a expr (* Binary primitive operator *)
   | Call of identifier option * identifier * 'a expr list
@@ -119,7 +121,9 @@ and 'a component_decl_node =
 and connection = Link of identifier * identifier * identifier * identifier
 [@@deriving show, ord, eq]
 
-and 'a definition = ComponentDef of 'a component_decl | InterfaceDef of 'a interface_decl
+and 'a definition = 
+  | ComponentDef of 'a component_decl 
+  | InterfaceDef of 'a interface_decl
 
 and 'a compilation_unit =
   | CompilationUnit of {

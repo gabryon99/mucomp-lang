@@ -103,6 +103,9 @@ rule next_token = parse
   | ">="                { C_GT_EQ}
   | "<="                { C_LT_EQ}
 
+  | "++"                { M_PLUS_PLUS }
+  | "--"                { M_PLUS_PLUS }
+
   (* Math operators *)
   | '+'                 { M_PLUS }
   | '-'                 { M_MINUS }

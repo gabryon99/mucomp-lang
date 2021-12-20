@@ -147,6 +147,7 @@ let first_pass ast global_table =
             match vtyp with
             | Ast.TVoid -> raise (Semantic_error(loc, "Variables cannot be declared of type void"))
             | Ast.TArray(_, Some n) when n <= 0 -> raise (Semantic_error(loc, "Array size must be larger than 1!"))
+            | Ast.TArray(t, _) when not(Ast.is_scalar_type t) -> raise (Semantic_error(loc, "Only arrays of scalar types are allowed!"))
             | _ ->
               let vattr = {id = vid; loc = loc; typ = vtyp} in
               let vsym = SVar({vattr = vattr}) in
@@ -322,10 +323,9 @@ let _check_local_decl_type annotated_node =
   let node = annotated_node.Ast.node in 
   let loc = annotated_node.Ast.annot in 
   match node with 
-  | Ast.LocalDecl(_, Ast.TVoid) -> 
-    raise (Semantic_error(loc, "Cannot declare variables of type void!"))
-  | Ast.LocalDecl(_, Ast.TArray(_, Some n)) ->
-    if n <= 0 then raise (Semantic_error(loc, "The array size cannot be less than 0!")) else ()
+  | Ast.LocalDecl(_, Ast.TVoid) -> raise (Semantic_error(loc, "Cannot declare variables of type void!"))
+  | Ast.LocalDecl(_, Ast.TArray(_, Some n)) when n <= 0 -> raise (Semantic_error(loc, "The array size cannot be less than 0!"))
+  | Ast.LocalDecl(_, Ast.TArray(t, _)) when not(Ast.is_scalar_type t) -> raise (Semantic_error(loc, "Only arrays of scalar types are allowed!"))
   | Ast.LocalDecl(_, _) -> ()
   | Ast.Stmt(_) -> ignore ()
 
@@ -426,6 +426,13 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
       | (Ast.Not, {Ast.annot = Ast.TChar; _}) -> raise (Semantic_error(loc, "Not operator cannot be applied to a character!"))
       | (Ast.Not, {Ast.annot = Ast.TInt; _}) -> raise (Semantic_error(loc, "Not operator cannot be applied to an integer!"))
       | _ -> raise (Semantic_error(loc, "Invalid unary operator expression!"))
+    end
+  | Ast.DoubleOp(dop, dop_prec, lv) ->
+    let new_lv_node = _type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
+    begin
+      match (new_lv_node.Ast.annot) with 
+      | Ast.TInt -> (Ast.DoubleOp(dop, dop_prec, new_lv_node)) @> (Ast.TInt)
+      | _ -> raise (Semantic_error(loc, "Increment/decrement operator can be applied only to integer variables!")) 
     end
   | Ast.Address(lv) ->
     let new_lv_node = _type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
