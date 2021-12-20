@@ -358,7 +358,7 @@ let rec _type_check_lvalue component_ast_node component_sym function_sym_tbl ann
         begin
           match (exp_new_node) with 
           | {Ast.annot = Ast.TInt; _} -> 
-            let final_typ = (match lv_typ with Ast.TArray(t, _) -> t | Ast.TRef(Ast.TArray(t, _)) -> t | _ -> ignore ()) in
+            let final_typ = (match lv_typ with Ast.TArray(t, _) -> t | Ast.TRef(t) when Ast.is_scalar_type t -> t | Ast.TRef(Ast.TArray(t, _)) when Ast.is_scalar_type t -> t | _ -> ignore ()) in
             (Ast.AccIndex(lv_new_node, exp_new_node)) @> final_typ
           | {Ast.annot = _; _} -> raise (Semantic_error(loc, "The array index does not evaluate to an integer!"))
         end
@@ -396,6 +396,7 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
     let _new_node_lv = _type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
     let _new_node_exp = _type_check_expr component_ast_node component_sym function_sym_tbl e in
     Printf.printf "LV[%s] = EXP[%s]\n" (Ast.show_typ _new_node_lv.Ast.annot) (Ast.show_typ _new_node_exp.Ast.annot);
+    (* Main body of type checking *)
     begin
       match (_new_node_lv, _new_node_exp) with 
       (* Case: T1 <- T2 <== T1=T2 && Scalar(T1) *)
@@ -418,13 +419,15 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
   | Ast.UnaryOp(uop, exp) ->
     let new_node_exp = _type_check_expr component_ast_node component_sym function_sym_tbl exp in 
     begin
-      match (uop, new_node_exp) with
-      | (Ast.Neg, {Ast.annot = Ast.TInt; _}) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TInt
-      | (Ast.Neg, {Ast.annot = Ast.TChar; _}) -> raise (Semantic_error(loc, "Minus operator cannot be applied to a character!"))
-      | (Ast.Neg, {Ast.annot = Ast.TBool; _}) -> raise (Semantic_error(loc, "Minus operator cannot be applied to a boolean!"))
-      | (Ast.Not, {Ast.annot = Ast.TBool; _}) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TBool
-      | (Ast.Not, {Ast.annot = Ast.TChar; _}) -> raise (Semantic_error(loc, "Not operator cannot be applied to a character!"))
-      | (Ast.Not, {Ast.annot = Ast.TInt; _}) -> raise (Semantic_error(loc, "Not operator cannot be applied to an integer!"))
+      match (uop, new_node_exp.Ast.annot) with
+      | (Ast.Neg, Ast.TInt) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TInt
+      | (Ast.Neg, Ast.TRef(Ast.TInt)) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TInt
+      | (Ast.Neg, Ast.TChar) -> raise (Semantic_error(loc, "Minus operator cannot be applied to a character!"))
+      | (Ast.Neg, Ast.TBool) -> raise (Semantic_error(loc, "Minus operator cannot be applied to a boolean!"))
+      | (Ast.Not, Ast.TBool) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TBool
+      | (Ast.Not, Ast.TRef(Ast.TBool)) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TBool
+      | (Ast.Not, Ast.TChar) -> raise (Semantic_error(loc, "Not operator cannot be applied to a character!"))
+      | (Ast.Not, Ast.TInt) -> raise (Semantic_error(loc, "Not operator cannot be applied to an integer!"))
       | _ -> raise (Semantic_error(loc, "Invalid unary operator expression!"))
     end
   | Ast.DoubleOp(dop, dop_prec, lv) ->
@@ -444,33 +447,42 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
       let typ1 = new_node_exp1.Ast.annot in 
       let typ2 = new_node_exp2.Ast.annot in 
       match (binop, typ1, typ2) with
+
       (* +, -, *, /, % operators *)
-      | (Ast.Add,   Ast.TInt, Ast.TInt)
-      | (Ast.Sub,   Ast.TInt, Ast.TInt)
-      | (Ast.Mult,  Ast.TInt, Ast.TInt)
-      | (Ast.Div,   Ast.TInt, Ast.TInt)
-      | (Ast.Mod,   Ast.TInt, Ast.TInt) -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TInt
+      | (_,   Ast.TInt, Ast.TInt)                     (* int + int *)
+      | (_,   Ast.TRef(Ast.TInt), Ast.TInt)           (* &int + int *)
+      | (_,   Ast.TInt, Ast.TRef(Ast.TInt))           (* int + &int *)
+      | (_,   Ast.TRef(Ast.TInt), Ast.TRef(Ast.TInt)) (* &int + &int *)
+      when Ast.is_math_operator binop -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TInt
+      
       (* >, <, >=, <= *)
-      | (Ast.Greater,   Ast.TInt, Ast.TInt)
-      | (Ast.Less,      Ast.TInt, Ast.TInt)
-      | (Ast.Geq,       Ast.TInt, Ast.TInt)
-      | (Ast.Leq,       Ast.TInt, Ast.TInt) -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TBool
+      | (_,   Ast.TInt, Ast.TInt)                     (* int + int *)
+      | (_,   Ast.TRef(Ast.TInt), Ast.TInt)           (* &int + int *)
+      | (_,   Ast.TInt, Ast.TRef(Ast.TInt))           (* int + &int *)
+      | (_,   Ast.TRef(Ast.TInt), Ast.TRef(Ast.TInt)) (* &int + &int *)
+      when Ast.is_compare_operator binop -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TBool
+      
       (* ==, != *)
-      | (Ast.Equal, Ast.TInt, Ast.TInt)
-      | (Ast.Neq,   Ast.TInt, Ast.TInt)   -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TBool
-      | (Ast.Equal, Ast.TBool, Ast.TBool)
-      | (Ast.Neq,   Ast.TBool, Ast.TBool) -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TBool
-      | (Ast.Equal, Ast.TChar, Ast.TChar)
-      | (Ast.Neq,   Ast.TChar, Ast.TChar) -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TBool
+      | (Ast.Equal, _, _)
+      | (Ast.Neq,   _, _) when (Ast.equal_typ typ1 typ2) && (Ast.is_scalar_type typ1 || Ast.is_ref_to_scalar_type typ1) -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TBool
+
       (* &&, || operators *)
-      | (Ast.And, Ast.TBool, Ast.TBool)
-      | (Ast.Or, Ast.TBool, Ast.TBool) -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TBool
+      | (_, Ast.TBool, Ast.TBool)
+      | (_, Ast.TRef(Ast.TBool), Ast.TBool)
+      | (_, Ast.TBool, Ast.TRef(Ast.TBool))
+      | (_, Ast.TRef(Ast.TBool), Ast.TRef(Ast.TBool)) 
+      when Ast.is_bool_operator binop -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TBool
 
-      | (Ast.Add, Ast.TInt, Ast.TBool)
-      | (Ast.Add, Ast.TBool, Ast.TInt) -> raise (Semantic_error(loc, "You cannot sum a integer with a boolean!"))
-      | (Ast.Add, Ast.TChar, Ast.TInt)
-      | (Ast.Add, Ast.TInt, Ast.TChar) -> raise (Semantic_error(loc, "You cannot sum a integer with a char!"))
 
+      (* Error cases ... *)
+      | (Ast.Add, _, _) -> 
+        let msg = Printf.sprintf "You cannot sum a `%s` with a `%s`!" (Ast.show_type typ1) (Ast.show_type typ2) in
+        raise (Semantic_error(loc, msg))
+
+      | (Ast.Equal, _, _)
+      | (Ast.Neq, _, _) when not(Ast.equal_typ typ1 typ2) -> 
+        let msg = Printf.sprintf "Invalid comparsion since the two types are different (%s <> %s)!" (Ast.show_type typ1) (Ast.show_type typ2) in 
+        raise (Semantic_error(loc, msg))
 
       | _ -> raise (Semantic_error(loc, "Binary operation not allowed!"))
     end

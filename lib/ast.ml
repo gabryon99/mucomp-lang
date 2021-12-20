@@ -142,10 +142,35 @@ type typed_compilation_unit = typ compilation_unit
 let make_node a b = { node = a; annot = b}
 
 let is_scalar_type = function
-  | TInt -> true
-  | TChar -> true 
-  | TBool -> true 
+  | TInt | TChar | TBool -> true 
   | _ -> false
+
+let is_ref_to_scalar_type = function 
+  | TRef(t) -> is_scalar_type t 
+  | _ -> false
+
+let is_math_operator = function 
+  | Add | Sub | Mult | Div | Mod -> true 
+  | _ -> false
+
+let is_bool_operator = function 
+  | And | Or -> true 
+  | _ -> false
+
+let is_compare_operator = function 
+  | Greater | Less | Geq | Leq -> true 
+  | _ -> false
+
+let rec show_type = function 
+  | TInt -> "int"
+  | TChar -> "char"
+  | TBool -> "bool"
+  | TVoid -> "void"
+  | TRef(t) -> "&" ^ (show_type t) 
+  | TArray(t, _) -> (show_type t) ^ "[]"
+  | TComponent(id) -> ("C" ^ id)
+  | TInterface(id) -> ("I" ^ id)
+  | _ -> "undefined"
 
 let make_fun_decl rtype fname formals body = {
   rtype = rtype; fname = fname; formals = formals; body = body
