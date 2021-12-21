@@ -525,8 +525,12 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
           (* From cconnect field derive the component name *)
           let cname = StrMap.find iname cconnect in 
           perform_call_type_checking cname ifun_attr
-        with Symbol_table.MissingEntry(_) ->
+        with 
+        | Symbol_table.MissingEntry(_) ->
             lookup_provided_interfaces t
+        | Not_found ->
+            let msg = Printf.sprintf "Looking for function `%s` failed, since the component `%s` does not link with any component providing the `%s` interface!" fname cname iname in
+            raise (Semantic_error(loc, msg))
     in
     begin
       (* Let's be sure that we are not invoking a variable... *)
