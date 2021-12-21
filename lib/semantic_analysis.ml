@@ -277,10 +277,12 @@ let first_pass ast global_table =
   | (Ast.Link(c1, i1, c2, i2))::tail -> 
     begin
       try 
+        (* Get the component c1 which uses the interface i1 *)
         let c1_sym = (match Symbol_table.lookup c1 global_table with 
           | SComponent(_) as c -> c 
           | SInterface({iattr = {id; _}; _}) -> raise (Semantic_error(Location.dummy_code_pos, (Printf.sprintf "Link invalid since %s is an interface!" id)))
           | _ -> ignore ()) in 
+        (* Get the component c2 which provides the interface i2 *)
         let c2_sym = (match Symbol_table.lookup c2 global_table with 
           | SComponent(_) as c -> c 
           | SInterface({iattr = {id; _}; _}) -> raise (Semantic_error(Location.dummy_code_pos, (Printf.sprintf "Link invalid since %s is an interface!" id)))
@@ -295,11 +297,11 @@ let first_pass ast global_table =
             let c1_sym_updated = (match c1_sym with SComponent(c) -> SComponent({c with cconnect = new_cconnect}) | _ -> ignore ()) in
             link_connect_block (Symbol_table.update_entry c1 c1_sym_updated global_table) tail
           with Symbol_table.MissingEntry(missing) ->
-            let msg = Printf.sprintf "Cannot find the declaration for interface `%s`!" missing in
+            let msg = Printf.sprintf "Linking: cannot find the provide/use for interface `%s`!" missing in
             raise (Semantic_error(Location.dummy_code_pos, msg))
         end
       with Symbol_table.MissingEntry(missing) ->
-        let msg = Printf.sprintf "Cannot find the decleration for component `%s`!" missing in 
+        let msg = Printf.sprintf "Linking: cannot find the decleration for component `%s`!" missing in 
         raise (Semantic_error(Location.dummy_code_pos, msg))
     end
   in
