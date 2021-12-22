@@ -90,6 +90,11 @@ rule next_token = parse
                         }
   | [''']               { character ' ' lexbuf }
   
+  | ['0'-'9']+identifier { 
+                            (* TODO: what about identifier not starting with _ or [a-zA-Z]*)
+                            raise (Lexing_error((Location.to_lexeme_position lexbuf), "Invalid identifier. Identifier must be start with an _ or a letter!")) 
+                         }
+
   (* Logical operators *)
   | ['!']               { L_NOT }
   | "&&"                { L_AND_AND }
@@ -135,7 +140,7 @@ rule next_token = parse
 
   | eof                 { EOF }
 
-  | _ as c              { Printf.printf "Unmatched: %c\n" c; raise (Lexing_error((Location.to_lexeme_position lexbuf), "Unrecognized token!")) }
+  | _                   { raise (Lexing_error((Location.to_lexeme_position lexbuf), "Unrecognized token!")) }
 
 and single_line_comment = parse
   | "\r\n"
@@ -153,6 +158,9 @@ and character c = parse
   | ['\\']['n']         { character '\n' lexbuf}
   | ['\\']['t']         { character '\t' lexbuf}
   | ['\\']['r']         { character '\r' lexbuf}
+  | ['\\']['b']         { character '\b' lexbuf}
+  | ['\\'][''']         { character '\'' lexbuf}
+  | ['\\']['"']         { character '\"' lexbuf}
   | [^'''] as c         { character c lexbuf }
   | _                   { raise (Lexing_error((Location.to_lexeme_position lexbuf), "Unrecognized character!"))}
 

@@ -124,6 +124,7 @@ and connection = Link of identifier * identifier * identifier * identifier
 and 'a definition = 
   | ComponentDef of 'a component_decl 
   | InterfaceDef of 'a interface_decl
+  | ConnectionDef of connection list
 
 and 'a compilation_unit =
   | CompilationUnit of {

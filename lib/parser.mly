@@ -6,12 +6,13 @@
   (* Define a new operator `@>` used to attach the location as an annotation for an annotated node. *)
   let (@>) a b = Ast.make_node a (Location.to_code_position b)
 
-  let build_compilation_unit decls connections =
-    let rec aux interfaces components = function
+  let build_compilation_unit decls =
+    let rec aux interfaces components connections = function
       | [] -> Ast.CompilationUnit({interfaces = interfaces; components = components; connections = connections})
-      | (Ast.InterfaceDef(iface_node))::t -> aux (iface_node::interfaces) components t
-      | (Ast.ComponentDef(comp_node))::t -> aux interfaces (comp_node::components) t
-    in aux [] [] decls
+      | (Ast.InterfaceDef(iface_node))::t -> aux (iface_node::interfaces) components connections t
+      | (Ast.ComponentDef(comp_node))::t -> aux interfaces (comp_node::components) connections t
+      | (Ast.ConnectionDef(conns)::t) -> aux interfaces components (conns@connections) t
+    in aux [] [] [] decls
 %} 
 
 /* Token declarations */
@@ -110,12 +111,13 @@
 
 /* Grammar Specification */
 compilation_unit:
-  | decls = top_decl* conns = flatten(connections*) EOF { build_compilation_unit decls conns }
+  | decls = top_decl* EOF { build_compilation_unit decls }
 ;
 
 top_decl:
-  | interface  { Ast.InterfaceDef($1) }
-  | component  { Ast.ComponentDef($1) }
+  | interface   { Ast.InterfaceDef($1) }
+  | component   { Ast.ComponentDef($1) }
+  | connections { Ast.ConnectionDef($1) }
 ;
 
 interface:

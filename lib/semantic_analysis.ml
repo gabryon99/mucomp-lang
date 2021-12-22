@@ -157,43 +157,49 @@ let first_pass ast global_table =
                 raise (Semantic_error(loc, "Double field variable declerations!"))
           end
       in
-      (* Create components attribute... *)
-      let cattr = {id = cname; loc = loc; typ = Ast.TComponent(cname)} in
-
       (* Check if the provides list has the prelude interface *)
       if List.mem "Prelude" provides then
         raise (Semantic_error(loc, "The Prelude interface cannot be provided by any component!"))
       else
-        (* Create a symbol table containing interface references provided by the component *)
-        let cprov = Symbol_table.begin_block (Symbol_table.empty_table) in 
-        let cprov = visit_prov_uses cprov "provides" provides in
-        (* Create a symbol table containing interface references provided by the component *)
-        let cuses = Symbol_table.begin_block (Symbol_table.empty_table) in
-        let cuses = visit_prov_uses cuses "uses" (List.cons "Prelude" uses) in
-        (* 
-          A component must implement all the members defined in the interfaces it provides,
-          so from the defined_interfaces map filter the interfaces provided by the component...
-        *)
-        (* Build component symbol table containing all the definitions inside a component (fields/functions) *)
-        let csym_tbl = Symbol_table.begin_block (Symbol_table.empty_table) in 
-        let csym_tbl = visit_member_definitions csym_tbl definitions in
-        (* Create a new symbol for the component and push it inside the symbol table *)
-        let csym = SComponent({cattr = cattr; csym_tbl = csym_tbl; cprov = cprov; cuses = cuses; cconnect = StrMap.empty}) in
-        try
-          visit_components (Symbol_table.add_entry cname csym global_table) tail
-        with Symbol_table.DuplicateEntry(_) ->
-          (* Check for duplicated symbol identifier *)
-          begin
-            let dup_sym = Symbol_table.lookup cname global_table in (* A MissingEntry exception cannot be thrown since the name is contained inside the table already *)
-            match dup_sym with 
-            | SInterface(_) -> 
-              let msg = Printf.sprintf "Component name not valid since it seems that an interface named` %s` already exists." cname in
-              raise (Semantic_error(loc, msg))
-            | SComponent(_) ->
-              let msg = Printf.sprintf "Duplicated component name. It seems that a component named` %s` already exists." cname in
-              raise (Semantic_error(loc, msg))
-            | _ -> ignore ()
-          end
+        (* Let's ensure provides and uses lists are disjoint *)
+        if not (Mcomp_stdlib.list_are_disjoint provides uses) then
+          raise (Semantic_error(loc, "Uses and provides lists are not disjoint!"))
+        else
+          (* Create components attribute... *)
+          let cattr = {id = cname; loc = loc; typ = Ast.TComponent(cname)} in
+          (* Create a symbol table containing interface references provided by the component *)
+          let cprov = Symbol_table.begin_block (Symbol_table.empty_table) in 
+          let cprov = visit_prov_uses cprov "provides" provides in
+          let cuses = Symbol_table.begin_block (Symbol_table.empty_table) in
+          let cuses = visit_prov_uses cuses "uses" (List.cons "Prelude" uses) in
+          (* 
+            A component must implement all the members defined in the interfaces it provides,
+            so from the defined_interfaces map filter the interfaces provided by the component...
+          *)
+          (* Build component symbol table containing all the definitions inside a component (fields/functions) *)
+          let csym_tbl = Symbol_table.begin_block (Symbol_table.empty_table) in 
+          let csym_tbl = visit_member_definitions csym_tbl definitions in
+          (* Create a new symbol for the component and push it inside the symbol table *)
+          let csym = SComponent({cattr = cattr; csym_tbl = csym_tbl; cprov = cprov; cuses = cuses; cconnect = StrMap.empty}) in
+          try
+            visit_components (Symbol_table.add_entry cname csym global_table) tail
+          with Symbol_table.DuplicateEntry(_) ->
+            (* Check for duplicated symbol identifier *)
+            begin
+              let dup_sym = Symbol_table.lookup cname global_table in (* A MissingEntry exception cannot be thrown since the name is contained inside the table already *)
+              match dup_sym with 
+              | SInterface(_) -> 
+                let msg = Printf.sprintf "Component name not valid since it seems that an interface named` %s` already exists." cname in
+                raise (Semantic_error(loc, msg))
+              | SComponent(_) ->
+                let msg = Printf.sprintf "Duplicated component name. It seems that a component named` %s` already exists." cname in
+                raise (Semantic_error(loc, msg))
+              | _ -> ignore ()
+            end
+  in
+  let rec find_interface name = function
+  | [] -> None
+  | ({Ast.node = (Ast.InterfaceDecl({iname; _}) as iface); _})::tail -> if iname = name then Some iface else find_interface name tail 
   in
   let rec check_component_provides global_table interfaces = function
   | [] -> global_table
@@ -202,10 +208,6 @@ let first_pass ast global_table =
     let loc = annotated_node.Ast.annot in
     match node with
     | Ast.ComponentDecl({cname; provides; _}) ->
-      let rec find_interface name = function
-      | [] -> None
-      | ({Ast.node = (Ast.InterfaceDecl({iname; _}) as iface); _})::tail -> if iname = name then Some iface else find_interface name tail 
-      in
       let cysm_tbl = (match Symbol_table.lookup cname global_table with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore ()) in 
       let interfaces_nodes = List.map (fun iname -> find_interface iname interfaces) provides in
       let _ = List.iter(fun i ->
@@ -251,6 +253,43 @@ let first_pass ast global_table =
       ) interfaces_nodes in
       check_component_provides global_table interfaces tail
   in
+  let rec check_component_uses global_table interfaces = function 
+  | [] -> global_table
+  | annotated_node::tail ->
+    let node = annotated_node.Ast.node in 
+    let loc = annotated_node.Ast.annot in 
+    match node with
+    | Ast.ComponentDecl({cname; uses; _}) ->
+      if List.mem "App" uses then
+        raise (Semantic_error(loc, "The App interface cannot be used, just provided once!"))
+      else
+      (* Get the component symbol table *)
+      let cysm_tbl = (match Symbol_table.lookup cname global_table with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore ()) in 
+      (* Get a list of interfaces nodes from uses list *)
+      let interfaces_nodes = List.map (fun iname -> find_interface iname interfaces) uses in
+      (* Check if the component define function member coming by the interfaces *)
+      let _ = List.iter(fun iface_node ->
+        match iface_node with
+        | None -> ()
+        | Some iface ->
+          (* Get the interface name and decleration from th interface node *)
+          let (iname, ideclarations) = (match (iface) with Ast.InterfaceDecl({iname; declarations}) -> (iname, declarations)) in
+            (* For each decleration node, check if the function is defined inside the component symbol table *)
+            List.iter(fun imember ->
+              match imember.Ast.node with
+              | Ast.FunDecl({Ast.fname; _}) ->
+                begin
+                  try
+                    let _ = Symbol_table.lookup fname cysm_tbl in 
+                    let msg = Printf.sprintf "Invalid function identifier `%s` since the component uses `%s` interface which declares the function!" fname iname in
+                    raise (Semantic_error(loc, msg))
+                  with Symbol_table.MissingEntry(_) -> () 
+                end 
+              | _ -> () (* Field member are ignored! *)
+            ) ideclarations
+      ) interfaces_nodes in
+      check_component_uses global_table interfaces tail
+  in
   let rec check_main_components global_table app_provided = function
   | [] ->
     if not app_provided then
@@ -263,7 +302,7 @@ let first_pass ast global_table =
     match node with
     | Ast.ComponentDecl({provides; _}) ->
       (* does the component provide the App interface? *)
-      let temp = List.exists ((=) "App") provides in
+      let temp = List.mem "App" provides in
       if app_provided && temp then
         let msg = "There was already a component providing the `App` interface." in
         raise (Semantic_error(loc, msg))
@@ -289,6 +328,7 @@ let first_pass ast global_table =
           | _ -> ignore ()) in 
         begin
           try
+            (* TODO: check for interface compatibility issues *)
             let (c1_sym_cuses, c1_sym_cconect) = (match c1_sym with SComponent({cuses; cconnect; _}) -> (cuses, cconnect) | _ -> ignore ()) in
             let c2_sym_cprov = (match c2_sym with SComponent({cprov;_}) -> cprov | _ -> ignore ()) in
             let _ = Symbol_table.lookup i1 c1_sym_cuses in
@@ -315,11 +355,11 @@ let first_pass ast global_table =
   let global_table = visit_components global_table components in
   (* Perform some checks *)
   let global_table = check_component_provides global_table interfaces components in
+  let global_table = check_component_uses global_table interfaces components in
   let global_table = check_main_components global_table false components in
   (* At the end, perform linking *)
   let global_table = link_connect_block global_table connections in
   global_table
-
 
 let _check_local_decl_type annotated_node = 
   let node = annotated_node.Ast.node in 

@@ -15,5 +15,11 @@ let list_remove element l =
   | h::t -> if h = element then aux acc t else aux (h::acc) t
 in aux [] l
 
+let list_are_disjoint l1 l2 =
+  let rec aux = function
+  | [] -> true
+  | h::t -> not(List.mem h l2) && aux t in 
+  aux l1
+
 let name_mangle id typ = 
   Printf.sprintf "%s$%s" id (show_typ typ)
