@@ -329,7 +329,7 @@ let first_pass ast global_table =
         begin
           try
             (* Check if the provided interface is compatible with the used one (the identifier must be the same) *)
-            if (i1 == i2) then
+            if (i1 = i2) then
               let (c1_sym_cuses, c1_sym_cconect) = (match c1_sym with SComponent({cuses; cconnect; _}) -> (cuses, cconnect) | _ -> ignore ()) in
               let c2_sym_cprov = (match c2_sym with SComponent({cprov;_}) -> cprov | _ -> ignore ()) in
               let _ = Symbol_table.lookup i1 c1_sym_cuses in
@@ -476,13 +476,13 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
       | (Ast.Not, Ast.TInt) -> raise (Semantic_error(loc, "Not operator cannot be applied to an integer!"))
       | _ -> raise (Semantic_error(loc, "Invalid unary operator expression!"))
     end
-  | Ast.DoubleOp(dop, dop_prec, lv) ->
+  (* | Ast.DoubleOp(dop, dop_prec, lv) ->
     let new_lv_node = _type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
     begin
       match (new_lv_node.Ast.annot) with 
       | Ast.TInt -> (Ast.DoubleOp(dop, dop_prec, new_lv_node)) @> (Ast.TInt)
       | _ -> raise (Semantic_error(loc, "Increment/decrement operator can be applied only to integer variables!")) 
-    end
+    end *)
   | Ast.Address(lv) ->
     let new_lv_node = _type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
     (Ast.Address(new_lv_node)) @> (Ast.TRef(new_lv_node.Ast.annot))

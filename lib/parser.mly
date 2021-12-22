@@ -174,6 +174,9 @@ fun_proto:
   | K_DEF fname = ID L_PAREN fp = separated_list(COMMA, var_sign) R_PAREN COLON bt = basic_type {
     Ast.make_fun_decl bt fname fp None
   }
+  | error {
+    failwith "An error occurred when the parser was analyzing a function signature!"
+  }
 ;
 
 c_member_decl:
