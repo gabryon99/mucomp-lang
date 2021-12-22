@@ -309,7 +309,7 @@ let first_pass ast global_table =
       else
         check_main_components global_table (app_provided || temp) tail
   in
-  let rec link_connect_block global_table = function
+  let rec link_connect_block global_table interfaces = function
   | [] -> global_table
   | (Ast.Link(c1, _, c2, _))::_ when (c1 = "Prelude") || (c2 = "Prelude") ->
     raise (Semantic_error(Location.dummy_code_pos, "Link to Prelude interface cannot be specified!"))
@@ -328,14 +328,18 @@ let first_pass ast global_table =
           | _ -> ignore ()) in 
         begin
           try
-            (* TODO: check for interface compatibility issues *)
-            let (c1_sym_cuses, c1_sym_cconect) = (match c1_sym with SComponent({cuses; cconnect; _}) -> (cuses, cconnect) | _ -> ignore ()) in
-            let c2_sym_cprov = (match c2_sym with SComponent({cprov;_}) -> cprov | _ -> ignore ()) in
-            let _ = Symbol_table.lookup i1 c1_sym_cuses in
-            let _ = Symbol_table.lookup i2 c2_sym_cprov in
-            let new_cconnect = StrMap.add i1 c2 c1_sym_cconect in
-            let c1_sym_updated = (match c1_sym with SComponent(c) -> SComponent({c with cconnect = new_cconnect}) | _ -> ignore ()) in
-            link_connect_block (Symbol_table.update_entry c1 c1_sym_updated global_table) tail
+            (* Check if the provided interface is compatible with the used one (the identifier must be the same) *)
+            if (i1 == i2) then
+              let (c1_sym_cuses, c1_sym_cconect) = (match c1_sym with SComponent({cuses; cconnect; _}) -> (cuses, cconnect) | _ -> ignore ()) in
+              let c2_sym_cprov = (match c2_sym with SComponent({cprov;_}) -> cprov | _ -> ignore ()) in
+              let _ = Symbol_table.lookup i1 c1_sym_cuses in
+              let _ = Symbol_table.lookup i2 c2_sym_cprov in
+              let new_cconnect = StrMap.add i1 c2 c1_sym_cconect in
+              let c1_sym_updated = (match c1_sym with SComponent(c) -> SComponent({c with cconnect = new_cconnect}) | _ -> ignore ()) in
+              link_connect_block (Symbol_table.update_entry c1 c1_sym_updated global_table) interfaces tail
+            else
+              let msg = Printf.sprintf "The link `%s.%s <- %s.%s` is not valid since the interface `%s` is not compatible with `%s`!" c1 i1 c2 i2 i1 i2 in
+              raise (Semantic_error(Location.dummy_code_pos, msg))
           with Symbol_table.MissingEntry(missing) ->
             let msg = Printf.sprintf "Linking: cannot find the provide/use for interface `%s`!" missing in
             raise (Semantic_error(Location.dummy_code_pos, msg))
@@ -358,7 +362,7 @@ let first_pass ast global_table =
   let global_table = check_component_uses global_table interfaces components in
   let global_table = check_main_components global_table false components in
   (* At the end, perform linking *)
-  let global_table = link_connect_block global_table connections in
+  let global_table = link_connect_block global_table interfaces connections in
   global_table
 
 let _check_local_decl_type annotated_node = 
