@@ -44,3 +44,11 @@ watch: ## Watch for the filesystem and rebuild on every change
 .PHONY: utop
 utop: ## Run a REPL and link with the project's libraries
 	opam exec -- dune utop --root . lib -- -implicit-bindings
+
+.PHONY: test_semant
+test_semant: ## Run a test utility for the semantic phase
+	python3 test/test.py --phase 1
+
+.PHONY: test_parser
+test_parser: ## Run a test utility for the parser phase
+	python3 test/test.py --phase 0
