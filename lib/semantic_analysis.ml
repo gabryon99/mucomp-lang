@@ -1,10 +1,8 @@
 exception Semantic_error of Location.code_pos * string
 
-module StrMap = Map.Make(String)
-
 type attr = {id: Ast.identifier; loc: Location.code_pos; typ: Ast.typ}
 type 'a sym = 
-  | SComponent of {cattr: 'a; csym_tbl: 'a sym_table; cprov: 'a sym_table; cuses: 'a sym_table; cconnect: (string) StrMap.t}
+  | SComponent of {cattr: 'a; csym_tbl: 'a sym_table; cprov: 'a sym_table; cuses: 'a sym_table;}
   | SInterface of {iattr: 'a; isym_tbl: 'a sym_table}
   | SFunction  of {fattr: 'a; fsym_tbl: 'a sym_table}
   | SVar       of {vattr: 'a}
@@ -180,7 +178,7 @@ let first_pass ast global_table =
           let csym_tbl = Symbol_table.begin_block (Symbol_table.empty_table) in 
           let csym_tbl = visit_member_definitions csym_tbl definitions in
           (* Create a new symbol for the component and push it inside the symbol table *)
-          let csym = SComponent({cattr = cattr; csym_tbl = csym_tbl; cprov = cprov; cuses = cuses; cconnect = StrMap.empty}) in
+          let csym = SComponent({cattr = cattr; csym_tbl = csym_tbl; cprov = cprov; cuses = cuses}) in
           try
             visit_components (Symbol_table.add_entry cname csym global_table) tail
           with Symbol_table.DuplicateEntry(_) ->
@@ -330,13 +328,11 @@ let first_pass ast global_table =
           try
             (* Check if the provided interface is compatible with the used one (the identifier must be the same) *)
             if (i1 = i2) then
-              let (c1_sym_cuses, c1_sym_cconect) = (match c1_sym with SComponent({cuses; cconnect; _}) -> (cuses, cconnect) | _ -> ignore ()) in
+              let (c1_sym_cuses) = (match c1_sym with SComponent({cuses; _}) -> cuses | _ -> ignore ()) in
               let c2_sym_cprov = (match c2_sym with SComponent({cprov;_}) -> cprov | _ -> ignore ()) in
               let _ = Symbol_table.lookup i1 c1_sym_cuses in
               let _ = Symbol_table.lookup i2 c2_sym_cprov in
-              let new_cconnect = StrMap.add i1 c2 c1_sym_cconect in
-              let c1_sym_updated = (match c1_sym with SComponent(c) -> SComponent({c with cconnect = new_cconnect}) | _ -> ignore ()) in
-              link_connect_block (Symbol_table.update_entry c1 c1_sym_updated global_table) interfaces tail
+              link_connect_block global_table interfaces tail
             else
               let msg = Printf.sprintf "The link `%s.%s <- %s.%s` is not valid since the interface `%s` is not compatible with `%s`!" c1 i1 c2 i2 i1 i2 in
               raise (Semantic_error(Location.dummy_code_pos, msg))
@@ -533,27 +529,33 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
       | _ -> raise (Semantic_error(loc, "Binary operation not allowed!"))
     end
   | Ast.Call(None, fname, exp_actual_list) ->
-    let (comp_sym_tbl, comp_uses_sym_tbl, cconnect) = (match component_sym with SComponent({csym_tbl; cuses; cconnect; _}) -> (csym_tbl, cuses, cconnect) | _ -> ignore ()) in
+    
+    (* Get the component symbol table *)
+    let (comp_sym_tbl, comp_uses_sym_tbl) = (match component_sym with SComponent({csym_tbl; cuses; _}) -> (csym_tbl, cuses) | _ -> ignore ()) in
     let (cname, comp_uses_identifiers) = (match component_ast_node with Ast.ComponentDecl({cname; uses; _}) -> (cname,uses)) in
-    let perform_call_type_checking cname fsym_attr = 
+
+    (* Function to perform the linking phase to qualify the function call to an interface *)
+    let perform_call_linking iname fsym_attr = 
+        (* Evaluate the actual paramaters to get info about the types *)
         let new_exp_actual_list = List.map (fun x -> _type_check_expr component_ast_node component_sym function_sym_tbl x) exp_actual_list in
         let actuals_type = List.map (fun x -> match x.Ast.annot with Ast.TArray(i, _) -> Ast.TArray(i, None) | Ast.TRef(t) -> t | _ -> x.Ast.annot) new_exp_actual_list in 
         match fsym_attr.typ with 
-        | Ast.TFun(formals_type, rtype) ->
+        | Ast.TFun(formals_type, rtype) ->  
           let length_formals = (List.length formals_type) in 
           let length_actuals = (List.length actuals_type) in
+          (* Check if the calling function has the exact number of paramaters *)
           if (length_actuals > length_formals) || (length_actuals < length_formals) then
             let msg = Printf.sprintf "Error on invoking function `%s`. The function expceted %d parameter(s) but %d was(were) given!" fname length_formals length_actuals in
             raise (Semantic_error(loc, msg))
           else
+            (* If each type of the actual match with the formals then success! *)
             if List.equal Ast.equal_typ formals_type actuals_type then
-              (Ast.Call(Some cname, fname, new_exp_actual_list)) @> rtype
+              (Ast.Call(Some iname, fname, new_exp_actual_list)) @> rtype
             else
-              let _ = Printf.printf "Expected: " in let _ = List.iter (fun x -> Printf.printf "%s\n" (Ast.show_typ x)) formals_type in
-              let _ = Printf.printf "Actual: " in let _ = List.iter (fun x -> Printf.printf "%s\n" (Ast.show_typ x)) actuals_type in
               raise (Semantic_error(loc, "The arguments type provided to the function call are wrong!\n" ))
         | _ -> ignore ()
     in
+
     let rec lookup_provided_interfaces = function
     | [] -> raise (Semantic_error(loc, "Call to an undefined function..."))
     | iname::t ->
@@ -561,16 +563,14 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
         let isym_tbl = (match Symbol_table.lookup iname comp_uses_sym_tbl with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore ()) in
         try
           let ifun_attr = (match Symbol_table.lookup fname isym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!")) | _ -> ignore ()) in 
-          perform_call_type_checking "Prelude" ifun_attr
+          perform_call_linking "Prelude" ifun_attr
         with Symbol_table.MissingEntry(_) -> 
             lookup_provided_interfaces t
       else
         let isym_tbl = (match Symbol_table.lookup iname comp_uses_sym_tbl with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore ()) in
         try
           let ifun_attr = (match Symbol_table.lookup fname isym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!")) | _ -> ignore ()) in 
-          (* From cconnect field derive the component name *)
-          let cname = StrMap.find iname cconnect in 
-          perform_call_type_checking cname ifun_attr
+          perform_call_linking iname ifun_attr
         with 
         | Symbol_table.MissingEntry(_) ->
             lookup_provided_interfaces t
@@ -588,7 +588,7 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
         try
           (* Search for the function name inside component symbol table*)
           let ifun_attr = (match Symbol_table.lookup fname comp_sym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!"))  |  _ -> ignore ()) in 
-          perform_call_type_checking cname ifun_attr
+          perform_call_linking cname ifun_attr
         with Symbol_table.MissingEntry(_) ->
           (* Well, the function is not defined inside our component, let's go to search it *)
           (* inside the provided interfaces... *)
@@ -706,7 +706,6 @@ let second_pass ast global_table =
       let fn_sym = Symbol_table.lookup fname csym_tbl in
       let fn_st = (match fn_sym with SFunction({fsym_tbl; _}) -> fsym_tbl | _ -> ignore ()) in
       let new_body = _type_check_stmt ast_node local_sym (rtype, fn_st) fbody in
-      (* TODO: check retun statement inside function body *)
       (Ast.FunDecl({Ast.rtype = rtype; fname = fname; formals = formals; body = Some(new_body)})) @> Ast.TVoid
   in
   let visit_interface_member member_node =

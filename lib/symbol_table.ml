@@ -27,15 +27,6 @@ let add_entry (id: Ast.identifier) v = function
         let t = StrMap.add id v t in
         SymbolTable({parent = p; table = t})
 
-let update_entry (id: Ast.identifier) v = function
-| EmptySymbolTable -> failwith "Cannot update an entry into a empty symbol table"
-| SymbolTable({parent = p; table = t}) -> 
-    if not (StrMap.mem id t) then
-        raise (MissingEntry(id))
-    else 
-        let t = StrMap.add id v t in
-        SymbolTable({parent = p; table = t})
-
 let rec lookup (id: Ast.identifier) = function 
 | EmptySymbolTable -> raise (MissingEntry(id))
 | SymbolTable({parent = p; table = t}) ->
@@ -48,6 +39,8 @@ let of_alist l =
     let new_st = begin_block empty_table in
     let acc st (id, v) = add_entry id v st in
     List.fold_left acc new_st l
+
+(* Debugging functions, not meant to be used in production. *)
 
 let get_bindings_block = function
 | EmptySymbolTable -> []
