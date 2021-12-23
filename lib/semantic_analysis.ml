@@ -437,7 +437,6 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
   | Ast.Assign(lv, e) ->
     let _new_node_lv = _type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
     let _new_node_exp = _type_check_expr component_ast_node component_sym function_sym_tbl e in
-    Printf.printf "LV[%s] = EXP[%s]\n" (Ast.show_typ _new_node_lv.Ast.annot) (Ast.show_typ _new_node_exp.Ast.annot);
     (* Main body of type checking *)
     begin
       match (_new_node_lv, _new_node_exp) with 

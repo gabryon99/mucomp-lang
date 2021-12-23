@@ -1,6 +1,6 @@
-(* Thrown by the add_entry function when there is already a symbol with that identifier. *)
+(* Thrown by the add_entry function when there is already a symbol with that identifier in the current block. *)
 exception DuplicateEntry of Ast.identifier 
-(* Thrown when the lookup fails on that identifier. *)
+(* Thrown when the lookup fails on a given identifier. *)
 exception MissingEntry of Ast.identifier
 
 type 'a t 
