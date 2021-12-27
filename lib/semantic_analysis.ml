@@ -6,12 +6,12 @@ type 'a sym =
   | SInterface of {iattr: 'a; isym_tbl: 'a sym_table}
   | SFunction  of {fattr: 'a; fsym_tbl: 'a sym_table}
   | SVar       of {vattr: 'a}
-and 'a sym_table = ('a sym) Symbol_table.t 
+and 'a sym_table = ('a sym) Symbol_table.t
 
 let (@>) node annot = Ast.make_node node annot
 
 (** Function used inside pattern matching for cases that are not eligible *)
-let ignore () = failwith "Should not happen"
+let ignore_pattern () = failwith "Should not happen"
 
 (** The function performs semantic-rule checks as described by the specification. *)
 let first_pass ast global_table = 
@@ -90,7 +90,7 @@ let first_pass ast global_table =
             | SComponent({cattr = {id; _;}; _}) -> 
               let msg = Printf.sprintf "Found a component `%s` in component %s %s list. Only interface can be there!" id cname tbl_name in 
               raise (Semantic_error(loc, msg))
-            | _ -> ignore ()
+            | _ -> ignore_pattern ()
           with 
           | Symbol_table.MissingEntry(_) ->
             (* There cannot be undefined interface... *)
@@ -192,7 +192,7 @@ let first_pass ast global_table =
               | SComponent(_) ->
                 let msg = Printf.sprintf "Duplicated component name. It seems that a component named` %s` already exists." cname in
                 raise (Semantic_error(loc, msg))
-              | _ -> ignore ()
+              | _ -> ignore_pattern ()
             end
   in
   let rec find_interface name = function
@@ -206,14 +206,14 @@ let first_pass ast global_table =
     let loc = annotated_node.Ast.annot in
     match node with
     | Ast.ComponentDecl({cname; provides; _}) ->
-      let cysm_tbl = (match Symbol_table.lookup cname global_table with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore ()) in 
+      let cysm_tbl = (match Symbol_table.lookup cname global_table with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore_pattern ()) in 
       let interfaces_nodes = List.map (fun iname -> find_interface iname interfaces) provides in
       let _ = List.iter(fun i ->
         match i with 
         | None -> ()
         | Some iface ->
         let (iname, ideclarations) = (match (iface) with Ast.InterfaceDecl({iname; declarations}) -> (iname, declarations)) in
-        let isym_tbl = (match Symbol_table.lookup iname global_table with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore ()) in
+        let isym_tbl = (match Symbol_table.lookup iname global_table with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore_pattern ()) in
         List.iter (fun imember -> 
           let imember_node = imember.Ast.node in 
           match imember_node with
@@ -227,7 +227,7 @@ let first_pass ast global_table =
                   if not(Ast.equal_typ iftyp cityp) then
                     let msg = Printf.sprintf "The function `%s.%s` type mismatch with the one defined in the interface `%s`!" cname fname iname in 
                     raise (Semantic_error(cloc, msg))
-                | (_, _) -> ignore ()
+                | (_, _) -> ignore_pattern ()
               with Symbol_table.MissingEntry(_) -> 
                 let msg = Printf.sprintf "The function `%s` defined inside the interface `%s` was not implemented inside the component `%s`!" fname iname cname in
                 raise (Semantic_error(loc, msg))
@@ -242,7 +242,7 @@ let first_pass ast global_table =
                   if not(Ast.equal_typ ivtyp cvtyp) then
                     let msg = Printf.sprintf "The field `%s.%s` type mismatch with the one defined in the interface `%s`!" cname ivid iname in 
                     raise (Semantic_error(cloc, msg))
-                | (_, _) -> ignore ()
+                | (_, _) -> ignore_pattern ()
               with Symbol_table.MissingEntry(_) -> 
                 let msg = Printf.sprintf "The field `%s` defined inside the interface `%s` was not implemented inside the component `%s`!" ivid iname cname in
                 raise (Semantic_error(loc, msg))
@@ -262,7 +262,7 @@ let first_pass ast global_table =
         raise (Semantic_error(loc, "The App interface cannot be used, just provided once!"))
       else
       (* Get the component symbol table *)
-      let cysm_tbl = (match Symbol_table.lookup cname global_table with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore ()) in 
+      let cysm_tbl = (match Symbol_table.lookup cname global_table with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore_pattern ()) in 
       (* Get a list of interfaces nodes from uses list *)
       let interfaces_nodes = List.map (fun iname -> find_interface iname interfaces) uses in
       (* Check if the component define function member coming by the interfaces *)
@@ -329,7 +329,7 @@ let _check_local_decl_type annotated_node =
   | Ast.LocalDecl(_, Ast.TArray(_, Some n)) when n <= 0 -> raise (Semantic_error(loc, "The array size cannot be less than 0!"))
   | Ast.LocalDecl(_, Ast.TArray(t, _)) when not(Ast.is_scalar_type t) -> raise (Semantic_error(loc, "Only arrays of scalar types are allowed!"))
   | Ast.LocalDecl(_, _) -> ()
-  | Ast.Stmt(_) -> ignore ()
+  | Ast.Stmt(_) -> ignore_pattern ()
 
 
 let _check_fun_rtype annotated_node = 
@@ -342,31 +342,30 @@ let _check_fun_rtype annotated_node =
       | Ast.TInt | Ast.TBool | Ast.TChar | Ast.TVoid -> ()
       | _  -> raise (Semantic_error(loc, "A function can only returns int, bool, char or void."))
     end
-  | Ast.VarDecl(_) -> ignore ()
+  | Ast.VarDecl(_) -> ignore_pattern ()
 
-
-let rec _type_check_lvalue component_ast_node component_sym function_sym_tbl annotated_lv = 
+let rec type_check_lvalue component_ast_node component_sym function_sym_tbl annotated_lv = 
   let node = annotated_lv.Ast.node in 
   let loc = annotated_lv.Ast.annot in 
   match node with
   | Ast.AccIndex(lv, exp) ->
-    let lv_new_node = _type_check_lvalue component_ast_node component_sym function_sym_tbl lv in 
+    let lv_new_node = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in 
     begin
       match (lv_new_node) with
-      | {Ast.node = Ast.AccIndex(_, _); _} -> ignore ()
+      | {Ast.node = Ast.AccIndex(_, _); _} -> ignore_pattern ()
       | {Ast.node = Ast.AccVar(_, _); annot = lv_typ} -> 
         let exp_new_node = _type_check_expr component_ast_node component_sym function_sym_tbl exp in 
         (* Let's ensure exp_new_node has a TInt type *)
         begin
           match (exp_new_node) with 
           | {Ast.annot = Ast.TInt; _} -> 
-            let final_typ = (match lv_typ with Ast.TArray(t, _) -> t | Ast.TRef(t) when Ast.is_scalar_type t -> t | Ast.TRef(Ast.TArray(t, _)) when Ast.is_scalar_type t -> t | _ -> ignore ()) in
+            let final_typ = (match lv_typ with Ast.TArray(t, _) -> t | Ast.TRef(t) when Ast.is_scalar_type t -> t | Ast.TRef(Ast.TArray(t, _)) when Ast.is_scalar_type t -> t | _ -> ignore_pattern ()) in
             (Ast.AccIndex(lv_new_node, exp_new_node)) @> final_typ
           | {Ast.annot = _; _} -> raise (Semantic_error(loc, "The array index does not evaluate to an integer!"))
         end
     end
   | Ast.AccVar(None, var_id) ->
-    let (cname, csym_tbl) = (match component_sym with SComponent({cattr = {id = cname; _}; csym_tbl; _}) -> (cname, csym_tbl) | _ -> ignore ()) in
+    let (cname, csym_tbl) = (match component_sym with SComponent({cattr = {id = cname; _}; csym_tbl; _}) -> (cname, csym_tbl) | _ -> ignore_pattern ()) in
     let check_inside_table name sym_tbl = 
       let sym = Symbol_table.lookup var_id sym_tbl in
       let typ = (match sym with SVar({vattr = {typ; _}}) -> typ | SFunction({fattr; _}) -> raise (Semantic_error(loc, (Printf.sprintf "Cannot access function `%s.%s` as a value!" cname fattr.id))) | _ -> failwith "Should not happen") in
@@ -374,28 +373,30 @@ let rec _type_check_lvalue component_ast_node component_sym function_sym_tbl ann
     in
     begin
       try
+        (* Is the variable inside the current function scope? *)
         check_inside_table None function_sym_tbl
       with Symbol_table.MissingEntry(_) ->
         begin
           try
+            (* Is the variable inside the component scope? *)
             check_inside_table (Some(cname)) csym_tbl
           with Symbol_table.MissingEntry(_) ->
             raise (Semantic_error(loc, "Missing variable definition!"))
         end
     end
-  | _ -> ignore ()
+  | _ -> ignore_pattern ()
 and _type_check_expr component_ast_node component_sym function_sym_tbl annotated_expr = 
   let node = annotated_expr.Ast.node in 
   let loc = annotated_expr.Ast.annot in 
   match node with
   | Ast.LV(lv) -> 
-    let new_node_lv = _type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
+    let new_node_lv = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
     begin
       match (new_node_lv) with
       | {Ast.annot = typ; _} -> (Ast.LV(new_node_lv)) @> typ
     end
   | Ast.Assign(lv, e) ->
-    let _new_node_lv = _type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
+    let _new_node_lv = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
     let _new_node_exp = _type_check_expr component_ast_node component_sym function_sym_tbl e in
     (* Main body of type checking *)
     begin
@@ -439,7 +440,7 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
       | _ -> raise (Semantic_error(loc, "Increment/decrement operator can be applied only to integer variables!")) 
     end *)
   | Ast.Address(lv) ->
-    let new_lv_node = _type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
+    let new_lv_node = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
     (Ast.Address(new_lv_node)) @> (Ast.TRef(new_lv_node.Ast.annot))
   | Ast.BinaryOp(binop, exp1, exp2) ->
     let new_node_exp1 = _type_check_expr component_ast_node component_sym function_sym_tbl exp1 in 
@@ -490,7 +491,7 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
   | Ast.Call(None, fname, exp_actual_list) ->
     
     (* Get the component symbol table *)
-    let (comp_sym_tbl, comp_uses_sym_tbl) = (match component_sym with SComponent({csym_tbl; cuses; _}) -> (csym_tbl, cuses) | _ -> ignore ()) in
+    let (comp_sym_tbl, comp_uses_sym_tbl) = (match component_sym with SComponent({csym_tbl; cuses; _}) -> (csym_tbl, cuses) | _ -> ignore_pattern ()) in
     let (cname, comp_uses_identifiers) = (match component_ast_node with Ast.ComponentDecl({cname; uses; _}) -> (cname,uses)) in
 
     (* Function to perform the linking phase to qualify the function call to an interface *)
@@ -512,23 +513,23 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
               (Ast.Call(name, fname, new_exp_actual_list)) @> rtype
             else
               raise (Semantic_error(loc, "The arguments type provided to the function call are wrong!\n" ))
-        | _ -> ignore ()
+        | _ -> ignore_pattern ()
     in
 
     let rec lookup_provided_interfaces = function
     | [] -> raise (Semantic_error(loc, "Call to an undefined function..."))
     | iname::t ->
       if iname = "Prelude" then
-        let isym_tbl = (match Symbol_table.lookup iname comp_uses_sym_tbl with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore ()) in
+        let isym_tbl = (match Symbol_table.lookup iname comp_uses_sym_tbl with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore_pattern ()) in
         try
-          let ifun_attr = (match Symbol_table.lookup fname isym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!")) | _ -> ignore ()) in 
+          let ifun_attr = (match Symbol_table.lookup fname isym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!")) | _ -> ignore_pattern ()) in 
           perform_call_linking (Some "Prelude") ifun_attr
         with Symbol_table.MissingEntry(_) -> 
             lookup_provided_interfaces t
       else
-        let isym_tbl = (match Symbol_table.lookup iname comp_uses_sym_tbl with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore ()) in
+        let isym_tbl = (match Symbol_table.lookup iname comp_uses_sym_tbl with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore_pattern ()) in
         try
-          let ifun_attr = (match Symbol_table.lookup fname isym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!")) | _ -> ignore ()) in 
+          let ifun_attr = (match Symbol_table.lookup fname isym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!")) | _ -> ignore_pattern ()) in 
           perform_call_linking (Some iname) ifun_attr
         with 
         | Symbol_table.MissingEntry(_) ->
@@ -540,20 +541,20 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
     begin
       (* Let's be sure that we are not invoking a variable... *)
       try
-        let _ = (match Symbol_table.lookup fname function_sym_tbl with SVar({vattr;}) -> vattr |  _ -> ignore ()) in 
+        let _ = (match Symbol_table.lookup fname function_sym_tbl with SVar({vattr;}) -> vattr |  _ -> ignore_pattern ()) in 
         raise (Semantic_error(loc, "Cannot invoke a variable!"))
       with Symbol_table.MissingEntry(_) ->
         (* If the name doesn't belong to a variable then we can check the function *)
         try
           (* Search for the function name inside component symbol table*)
-          let ifun_attr = (match Symbol_table.lookup fname comp_sym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!"))  |  _ -> ignore ()) in 
+          let ifun_attr = (match Symbol_table.lookup fname comp_sym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!"))  |  _ -> ignore_pattern ()) in 
           perform_call_linking None ifun_attr
         with Symbol_table.MissingEntry(_) ->
           (* Well, the function is not defined inside our component, let's go to search it *)
           (* inside the provided interfaces... *)
           lookup_provided_interfaces ("Prelude"::comp_uses_identifiers)
     end
-  | _ -> ignore ()
+  | _ -> ignore_pattern ()
 and _type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_tbl) annotated_stmt = 
   let node = annotated_stmt.Ast.node in 
   let loc = annotated_stmt.Ast.annot in
@@ -607,7 +608,7 @@ and _type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_t
           | _ -> raise (Semantic_error(loc, "The for guard is not a boolean expression!"))
         end
       | (None, None, None) -> (Ast.For(None, None, None, new_for_stmt)) @> (Ast.TVoid)
-      | _ -> ignore ()
+      | _ -> ignore_pattern ()
     end
   | Ast.Return(None) -> (Ast.Return(None)) @> Ast.TVoid
   | Ast.Return(Some(exp)) ->
@@ -658,12 +659,12 @@ let second_pass ast global_table =
     let _loc = member_node.Ast.annot in
     match node with
     | Ast.VarDecl(vd) -> (Ast.VarDecl(vd)) @> Ast.TVoid
-    | Ast.FunDecl({Ast.body = None; _}) -> ignore ()
+    | Ast.FunDecl({Ast.body = None; _}) -> ignore_pattern ()
     | Ast.FunDecl({Ast.rtype; Ast.fname; Ast.formals; body = Some(fbody)}) ->
       let _ = _check_fun_rtype member_node in
-      let csym_tbl = (match local_sym with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore ()) in
+      let csym_tbl = (match local_sym with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore_pattern ()) in
       let fn_sym = Symbol_table.lookup fname csym_tbl in
-      let fn_st = (match fn_sym with SFunction({fsym_tbl; _}) -> fsym_tbl | _ -> ignore ()) in
+      let fn_st = (match fn_sym with SFunction({fsym_tbl; _}) -> fsym_tbl | _ -> ignore_pattern ()) in
       let new_body = _type_check_stmt ast_node local_sym (rtype, fn_st) fbody in
       (Ast.FunDecl({Ast.rtype = rtype; fname = fname; formals = formals; body = Some(new_body)})) @> Ast.TVoid
   in
@@ -673,7 +674,7 @@ let second_pass ast global_table =
     match node with
     | Ast.VarDecl(vd) -> (Ast.VarDecl(vd)) @> Ast.TVoid
     | Ast.FunDecl({Ast.rtype; Ast.fname; Ast.formals; body = None}) -> (Ast.FunDecl({Ast.rtype = rtype; fname = fname; formals = formals; body = None})) @> Ast.TVoid
-    | Ast.FunDecl(_) -> ignore ()
+    | Ast.FunDecl(_) -> ignore_pattern ()
   in
   let visit_component comp_node = 
     let node = comp_node.Ast.node in
