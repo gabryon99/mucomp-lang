@@ -307,45 +307,7 @@ let first_pass ast global_table =
       else
         check_main_components global_table (app_provided || temp) tail
   in
-  let rec link_connect_block global_table interfaces = function
-  | [] -> global_table
-  | (Ast.Link(c1, _, c2, _))::_ when (c1 = "Prelude") || (c2 = "Prelude") ->
-    raise (Semantic_error(Location.dummy_code_pos, "Link to Prelude interface cannot be specified!"))
-  | (Ast.Link(c1, i1, c2, i2))::tail -> 
-    begin
-      try 
-        (* Get the component c1 which uses the interface i1 *)
-        let c1_sym = (match Symbol_table.lookup c1 global_table with 
-          | SComponent(_) as c -> c 
-          | SInterface({iattr = {id; _}; _}) -> raise (Semantic_error(Location.dummy_code_pos, (Printf.sprintf "Link invalid since %s is an interface!" id)))
-          | _ -> ignore ()) in 
-        (* Get the component c2 which provides the interface i2 *)
-        let c2_sym = (match Symbol_table.lookup c2 global_table with 
-          | SComponent(_) as c -> c 
-          | SInterface({iattr = {id; _}; _}) -> raise (Semantic_error(Location.dummy_code_pos, (Printf.sprintf "Link invalid since %s is an interface!" id)))
-          | _ -> ignore ()) in 
-        begin
-          try
-            (* Check if the provided interface is compatible with the used one (the identifier must be the same) *)
-            if (i1 = i2) then
-              let (c1_sym_cuses) = (match c1_sym with SComponent({cuses; _}) -> cuses | _ -> ignore ()) in
-              let c2_sym_cprov = (match c2_sym with SComponent({cprov;_}) -> cprov | _ -> ignore ()) in
-              let _ = Symbol_table.lookup i1 c1_sym_cuses in
-              let _ = Symbol_table.lookup i2 c2_sym_cprov in
-              link_connect_block global_table interfaces tail
-            else
-              let msg = Printf.sprintf "The link `%s.%s <- %s.%s` is not valid since the interface `%s` is not compatible with `%s`!" c1 i1 c2 i2 i1 i2 in
-              raise (Semantic_error(Location.dummy_code_pos, msg))
-          with Symbol_table.MissingEntry(missing) ->
-            let msg = Printf.sprintf "Linking: cannot find the provide/use for interface `%s`!" missing in
-            raise (Semantic_error(Location.dummy_code_pos, msg))
-        end
-      with Symbol_table.MissingEntry(missing) ->
-        let msg = Printf.sprintf "Linking: cannot find the decleration for component `%s`!" missing in 
-        raise (Semantic_error(Location.dummy_code_pos, msg))
-    end
-  in
-  let (interfaces, components, connections) = (match ast with Ast.CompilationUnit({interfaces; components; connections}) -> (interfaces, components, connections)) in
+  let (interfaces, components) = (match ast with Ast.CompilationUnit({interfaces; components; _}) -> (interfaces, components)) in
   (* Based the global table table containing the interface symbols, let's get a string map that will be used later with components *)
   (* Preload the `Prelude` and `App` interface into the global symbol table *)
   let global_table = load_prelude_interface "Prelude" Mcomp_stdlib.prelude_signature global_table in 
@@ -357,8 +319,6 @@ let first_pass ast global_table =
   let global_table = check_component_provides global_table interfaces components in
   let global_table = check_component_uses global_table interfaces components in
   let global_table = check_main_components global_table false components in
-  (* At the end, perform linking *)
-  let global_table = link_connect_block global_table interfaces connections in
   global_table
 
 let _check_local_decl_type annotated_node = 

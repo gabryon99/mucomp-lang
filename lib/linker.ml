@@ -19,22 +19,30 @@ let check_connections ast =
   in
   let rec visit_connections connections component_sym_table = match connections with
   | [] -> component_sym_table
+  | (Ast.Link(c1, _, c2, _))::_ when (c1 = "Prelude") || (c2 = "Prelude") ->
+    raise (LinkingError("Link to Prelude interface cannot be specified!"))
+  | (Ast.Link(c1, _, c2, _))::_ when (c1 = "App") || (c2 = "App") ->
+    raise (LinkingError("Link to App interface cannot be specified!"))
   | (Ast.Link(c1, i1, c2, i2))::tail -> 
       (* Verify connection integrity: *)
       try
         (* Does the component c1 exists? And c2? *)
         let (c1_uses) = match Symbol_table.lookup c1 component_sym_table with SComponent({uses; _}) -> (uses) | _ -> ignore_pattern () in
         let (c2_provides) = match Symbol_table.lookup c2 component_sym_table with SComponent({provides; _}) -> (provides) | _ -> ignore_pattern () in
+        (* Is i1 compatible with i2? *)
         (* Does the component c1 has i1 in the uses list? *)
         (* Does the component c2 has i2 in the provides list? *)
-        match (List.mem i1 c1_uses, List.mem i2 c2_provides) with 
-        | (false, _) ->
+        match (i1 = i2, List.mem i1 c1_uses, List.mem i2 c2_provides) with
+        | (false, _, _) ->
+          let msg = Printf.sprintf "The link (%s.%s <- %s.%s) is not valid since the interface %s is not compatible with interface %s!" c1 i1 c2 i2 i1 i2 in
+          raise (LinkingError(msg))
+        | (_, false, _) ->
           let msg = Printf.sprintf "the interface `%s` is not inside the uses list of component `%s`!" i1 c1 in
           raise (LinkingError(msg))
-        | (_, false) -> 
+        | (_, _, false) -> 
           let msg = Printf.sprintf "the interface `%s` is not inside the provides list of component `%s`!" i2 c2 in
           raise (LinkingError(msg))
-        | (true, true) -> 
+        | (true, true, true) -> 
           begin
             (* Create a new SLink symbol and insert it inside the new symbol table *)
             try
