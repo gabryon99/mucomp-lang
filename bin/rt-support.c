@@ -1,13 +1,21 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+#define INPUT_SIZE 256
 
 int getint(){
-    char buffer[32];
-    if(fgets(buffer, 32, stdin) == NULL)
-      return 0;
-    return atoi(buffer);
+
+    char buffer[INPUT_SIZE];
+    if (fgets(buffer, INPUT_SIZE, stdin) == NULL) return 0;
+  
+    return (int) strtol(buffer, NULL, 10);
 }
 
 void print(int n){
-  printf("%d\n", n);
+  fprintf(stdout, "%d\n", n);
+}
+
+void print_stderr(int n) {
+  fprintf(stderr, "%d\n", n);
 }
