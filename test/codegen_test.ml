@@ -42,12 +42,15 @@ let process_source filename =
   let source = load_file filename in 
   let lexbuf = Lexing.from_string ~with_positions:true source in 
   try
-    lexbuf |>
-    Parsing.parse Scanner.next_token |>
-    Semantic_analysis.type_check |>
-    Linker.wire_components |>
-    Ast.show_typed_compilation_unit |> 
-    Printf.printf "Linking phase succeded!\n\n%s\n"  
+    let llmodule = 
+      lexbuf |>
+      Parsing.parse Scanner.next_token |>
+      Semantic_analysis.type_check |>
+      Linker.wire_components |>
+      Codegen.to_llvm_module
+    in 
+    Llvm_analysis.assert_valid_module llmodule; 
+    Printf.printf "; Code generation succeded!\n\n%s\n" (Llvm.string_of_llmodule llmodule)  
   with 
   | Scanner.Lexing_error (pos, msg)
   | Parsing.Syntax_error (pos,msg) -> 

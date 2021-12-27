@@ -534,7 +534,7 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
     let (cname, comp_uses_identifiers) = (match component_ast_node with Ast.ComponentDecl({cname; uses; _}) -> (cname,uses)) in
 
     (* Function to perform the linking phase to qualify the function call to an interface *)
-    let perform_call_linking iname fsym_attr = 
+    let perform_call_linking name fsym_attr = 
         (* Evaluate the actual paramaters to get info about the types *)
         let new_exp_actual_list = List.map (fun x -> _type_check_expr component_ast_node component_sym function_sym_tbl x) exp_actual_list in
         let actuals_type = List.map (fun x -> match x.Ast.annot with Ast.TArray(i, _) -> Ast.TArray(i, None) | Ast.TRef(t) -> t | _ -> x.Ast.annot) new_exp_actual_list in 
@@ -549,7 +549,7 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
           else
             (* If each type of the actual match with the formals then success! *)
             if List.equal Ast.equal_typ formals_type actuals_type then
-              (Ast.Call(Some iname, fname, new_exp_actual_list)) @> rtype
+              (Ast.Call(name, fname, new_exp_actual_list)) @> rtype
             else
               raise (Semantic_error(loc, "The arguments type provided to the function call are wrong!\n" ))
         | _ -> ignore ()
@@ -562,14 +562,14 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
         let isym_tbl = (match Symbol_table.lookup iname comp_uses_sym_tbl with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore ()) in
         try
           let ifun_attr = (match Symbol_table.lookup fname isym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!")) | _ -> ignore ()) in 
-          perform_call_linking "Prelude" ifun_attr
+          perform_call_linking (Some "Prelude") ifun_attr
         with Symbol_table.MissingEntry(_) -> 
             lookup_provided_interfaces t
       else
         let isym_tbl = (match Symbol_table.lookup iname comp_uses_sym_tbl with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore ()) in
         try
           let ifun_attr = (match Symbol_table.lookup fname isym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!")) | _ -> ignore ()) in 
-          perform_call_linking iname ifun_attr
+          perform_call_linking (Some iname) ifun_attr
         with 
         | Symbol_table.MissingEntry(_) ->
             lookup_provided_interfaces t
@@ -587,7 +587,7 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
         try
           (* Search for the function name inside component symbol table*)
           let ifun_attr = (match Symbol_table.lookup fname comp_sym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!"))  |  _ -> ignore ()) in 
-          perform_call_linking cname ifun_attr
+          perform_call_linking None ifun_attr
         with Symbol_table.MissingEntry(_) ->
           (* Well, the function is not defined inside our component, let's go to search it *)
           (* inside the provided interfaces... *)
