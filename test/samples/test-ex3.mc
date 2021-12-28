@@ -9,6 +9,7 @@ component Application provides App {
     while (i < n) { 
       print(i); 
       i=i+1;
-    } 
+    }
+    return 0;
   }
 }

@@ -2,7 +2,7 @@
 
 component EntryPoint provides App { 
 
-  def foo(n: int) {
+  def foo(n: int): int {
     return n;
   }
 
