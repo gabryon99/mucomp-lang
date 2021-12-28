@@ -87,78 +87,82 @@ let check_connections ast =
   in
   component_sym_table
 
-let rec qualify_call_expression component_link_table node =
-  match (node.Ast.node) with 
+let rec qualify_call_expression current_comp_name component_link_table node =
+  match (node.Ast.node) with
+  | Ast.Call(None, fun_name, exp_list) ->
+    let new_exp_list = List.map (qualify_call_expression current_comp_name component_link_table) exp_list in
+    (Ast.Call(Some current_comp_name, fun_name, new_exp_list)) @> (node.Ast.annot)
   | Ast.Call(Some iname, fun_name, exp_list) ->
     (* Qualify the interface name... *)
     begin
       try
-        let cname = match Symbol_table.lookup iname component_link_table with SLink({provide; _}) -> provide | _ -> ignore_pattern () in
-        Ast.Call(Some cname, fun_name, exp_list) @> (node.Ast.annot)
+        let cname = if iname = "Prelude" then "Prelude" else match Symbol_table.lookup iname component_link_table with SLink({provide; _}) -> provide | _ -> ignore_pattern () in
+        let new_exp_list = List.map (qualify_call_expression current_comp_name component_link_table) exp_list in
+        Ast.Call(Some cname, fun_name, new_exp_list) @> (node.Ast.annot)
       with Symbol_table.MissingEntry(_) ->
-        node
+        raise (LinkingError(iname))
     end
   | Ast.Assign(lv, exp) ->
-    let new_exp = qualify_call_expression component_link_table exp in
+    let new_exp = qualify_call_expression current_comp_name component_link_table exp in
     (Ast.Assign(lv, new_exp)) @> (node.Ast.annot)
   | Ast.UnaryOp(uop, exp) -> 
-    let new_exp = qualify_call_expression component_link_table exp in
+    let new_exp = qualify_call_expression current_comp_name component_link_table exp in
     (Ast.UnaryOp(uop, new_exp)) @> (node.Ast.annot)
   | Ast.BinaryOp(bop, exp1, exp2) -> 
-      let new_exp1 = qualify_call_expression component_link_table exp1 in
-      let new_exp2 = qualify_call_expression component_link_table exp2 in
+      let new_exp1 = qualify_call_expression current_comp_name component_link_table exp1 in
+      let new_exp2 = qualify_call_expression current_comp_name component_link_table exp2 in
       (Ast.BinaryOp(bop, new_exp1, new_exp2)) @> (node.Ast.annot)
   | _ -> node
-let rec visit_statements component_link_table node =
+let rec visit_statements current_comp_name component_link_table node =
   match (node.Ast.node) with
   | Ast.If(exp, s1, s2) ->
-    let new_exp1 = qualify_call_expression component_link_table exp in
-    let new_s1 = visit_statements component_link_table s1 in
-    let new_s2 = visit_statements component_link_table s2 in
+    let new_exp1 = qualify_call_expression current_comp_name component_link_table exp in
+    let new_s1 = visit_statements current_comp_name component_link_table s1 in
+    let new_s2 = visit_statements current_comp_name component_link_table s2 in
     (Ast.If(new_exp1, new_s1, new_s2)) @> (node.Ast.annot)
   | Ast.While(exp, s1) ->
-    let new_exp1 = qualify_call_expression component_link_table exp in
-    let new_s1 = visit_statements component_link_table s1 in
+    let new_exp1 = qualify_call_expression current_comp_name component_link_table exp in
+    let new_s1 = visit_statements current_comp_name component_link_table s1 in
     (Ast.While(new_exp1, new_s1)) @> (node.Ast.annot)
   | Ast.For(e1, e2, e3, s1) ->
-    let new_exp1 = match e1 with None -> None | Some e -> Some (qualify_call_expression component_link_table e) in
-    let new_exp2 = match e2 with None -> None | Some e -> Some (qualify_call_expression component_link_table e) in
-    let new_exp3 = match e3 with None -> None | Some e -> Some (qualify_call_expression component_link_table e) in
-    let new_s1 = visit_statements component_link_table s1 in
+    let new_exp1 = match e1 with None -> None | Some e -> Some (qualify_call_expression current_comp_name component_link_table e) in
+    let new_exp2 = match e2 with None -> None | Some e -> Some (qualify_call_expression current_comp_name component_link_table e) in
+    let new_exp3 = match e3 with None -> None | Some e -> Some (qualify_call_expression current_comp_name component_link_table e) in
+    let new_s1 = visit_statements current_comp_name component_link_table s1 in
     Ast.For(new_exp1, new_exp2, new_exp3, new_s1) @> (node.Ast.annot)
-  | Ast.Expr(exp) -> Ast.Expr(qualify_call_expression component_link_table exp) @> (node.Ast.annot)
+  | Ast.Expr(exp) -> Ast.Expr(qualify_call_expression current_comp_name component_link_table exp) @> (node.Ast.annot)
   | Ast.Return(Some e) ->
-    let new_exp = qualify_call_expression component_link_table e in 
+    let new_exp = qualify_call_expression current_comp_name component_link_table e in 
     (Ast.Return(Some new_exp)) @> (node.Ast.annot)
   | Ast.Block(stmts) ->
-    let new_stmts = visit_stmts_list component_link_table [] stmts in
+    let new_stmts = visit_stmts_list current_comp_name component_link_table [] stmts in
     Ast.Block(new_stmts) @> (node.Ast.annot)
   | _ -> node
-and visit_stmts_list component_link_table acc = function
-  | [] -> acc
+and visit_stmts_list current_comp_name component_link_table acc = function
+  | [] -> List.rev acc
   | annotated_node::tail -> 
     match (annotated_node.Ast.node) with 
-    | Ast.LocalDecl(_) -> visit_stmts_list component_link_table (annotated_node::acc) tail
+    | Ast.LocalDecl(_) -> visit_stmts_list current_comp_name component_link_table (annotated_node::acc) tail
     | Ast.Stmt(s) -> 
-      let new_stmt = (Ast.Stmt(visit_statements component_link_table s)) @> (annotated_node.Ast.annot) in
-      visit_stmts_list component_link_table (new_stmt::acc) tail
-and visit_component_definitions component_link_table acc = function 
-  | [] -> acc
+      let new_stmt = (Ast.Stmt(visit_statements current_comp_name component_link_table s)) @> (annotated_node.Ast.annot) in
+      visit_stmts_list current_comp_name component_link_table (new_stmt::acc) tail
+and visit_component_definitions current_comp_name component_link_table acc = function 
+  | [] -> List.rev acc
   | annotated_node::tail ->
     match (annotated_node.Ast.node) with 
-    | Ast.VarDecl(_) -> visit_component_definitions component_link_table (annotated_node::acc) tail
+    | Ast.VarDecl(_) -> visit_component_definitions current_comp_name component_link_table (annotated_node::acc) tail
     | Ast.FunDecl({Ast.body = Some s; _} as fd) ->
-      let new_stmt = visit_statements component_link_table s in
+      let new_stmt = visit_statements current_comp_name component_link_table s in
       let new_fun_decl = Ast.FunDecl({fd with Ast.body = Some new_stmt}) @> (annotated_node.Ast.annot) in 
-      visit_component_definitions component_link_table (new_fun_decl::acc) tail
+      visit_component_definitions current_comp_name component_link_table (new_fun_decl::acc) tail
     | Ast.FunDecl({Ast.body = None; _}) -> ignore_pattern ()
 and qualify_components acc global_table = function
-  | [] -> acc 
+  | [] -> List.rev acc 
   | annotated_node::tail ->
     match (annotated_node.Ast.node) with 
     | Ast.ComponentDecl(comp) ->
       let component_link_table = match Symbol_table.lookup comp.cname global_table with SComponent(csym) -> csym.links | _ -> ignore_pattern () in 
-      let new_definitions = visit_component_definitions component_link_table [] comp.definitions in
+      let new_definitions = visit_component_definitions comp.cname component_link_table [] comp.definitions in
       let new_component = Ast.ComponentDecl({comp with definitions = new_definitions}) @> annotated_node.Ast.annot in 
       qualify_components (new_component::acc) global_table tail
 

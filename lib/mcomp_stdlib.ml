@@ -2,7 +2,9 @@ open Ast
 
 let prelude_signature = [
   "print", TFun([TInt],TVoid);
-  "getint", TFun([], TInt)
+  "print_err", TFun([TInt],TVoid);
+  "getint", TFun([], TInt);
+  "abort", TFun([TInt], TVoid);
 ]
 
 let app_signature = [
@@ -21,5 +23,8 @@ let list_are_disjoint l1 l2 =
   | h::t -> not(List.mem h l2) && aux t in 
   aux l1
 
-let name_mangle id typ = 
-  Printf.sprintf "%s$%s" id (show_typ typ)
+let list_zip_with_index l1 =
+  let rec aux idx acc = function
+  | [] -> acc
+  | h::t -> aux (idx + 1) ((idx, h)::acc) t in 
+  aux 0 [] l1

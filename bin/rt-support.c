@@ -12,10 +12,14 @@ int getint(){
     return (int) strtol(buffer, NULL, 10);
 }
 
+void abort(int n) {
+  exit(n);
+}
+
 void print(int n){
   fprintf(stdout, "%d\n", n);
 }
 
-void print_stderr(int n) {
+void print_err(int n) {
   fprintf(stderr, "%d\n", n);
 }

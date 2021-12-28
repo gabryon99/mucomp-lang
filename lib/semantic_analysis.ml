@@ -658,7 +658,7 @@ let second_pass ast global_table =
     let node = member_node.Ast.node in 
     let _loc = member_node.Ast.annot in
     match node with
-    | Ast.VarDecl(vd) -> (Ast.VarDecl(vd)) @> Ast.TVoid
+    | Ast.VarDecl(vd) -> (Ast.VarDecl(vd)) @> (snd vd)
     | Ast.FunDecl({Ast.body = None; _}) -> ignore_pattern ()
     | Ast.FunDecl({Ast.rtype; Ast.fname; Ast.formals; body = Some(fbody)}) ->
       let _ = _check_fun_rtype member_node in
@@ -666,14 +666,17 @@ let second_pass ast global_table =
       let fn_sym = Symbol_table.lookup fname csym_tbl in
       let fn_st = (match fn_sym with SFunction({fsym_tbl; _}) -> fsym_tbl | _ -> ignore_pattern ()) in
       let new_body = _type_check_stmt ast_node local_sym (rtype, fn_st) fbody in
-      (Ast.FunDecl({Ast.rtype = rtype; fname = fname; formals = formals; body = Some(new_body)})) @> Ast.TVoid
+      let formals_type = List.map (snd) formals in
+      (Ast.FunDecl({Ast.rtype = rtype; fname = fname; formals = formals; body = Some(new_body)})) @> (Ast.TFun(formals_type, rtype))
   in
   let visit_interface_member member_node =
     let node = member_node.Ast.node in 
     let _loc = member_node.Ast.annot in
     match node with
-    | Ast.VarDecl(vd) -> (Ast.VarDecl(vd)) @> Ast.TVoid
-    | Ast.FunDecl({Ast.rtype; Ast.fname; Ast.formals; body = None}) -> (Ast.FunDecl({Ast.rtype = rtype; fname = fname; formals = formals; body = None})) @> Ast.TVoid
+    | Ast.VarDecl(vd) -> (Ast.VarDecl(vd)) @> (snd vd)
+    | Ast.FunDecl({Ast.rtype; Ast.fname; Ast.formals; body = None}) -> 
+      let formals_type = List.map (snd) formals in
+      (Ast.FunDecl({Ast.rtype = rtype; fname = fname; formals = formals; body = None})) @> (Ast.TFun(formals_type, rtype))
     | Ast.FunDecl(_) -> ignore_pattern ()
   in
   let visit_component comp_node = 
