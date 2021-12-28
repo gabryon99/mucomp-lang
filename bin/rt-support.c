@@ -4,7 +4,7 @@
 
 #define INPUT_SIZE 256
 
-int getint(){
+int __prelude_getint(){
 
     char buffer[INPUT_SIZE];
     if (fgets(buffer, INPUT_SIZE, stdin) == NULL) return 0;
@@ -12,14 +12,14 @@ int getint(){
     return (int) strtol(buffer, NULL, 10);
 }
 
-void abort(int n) {
+void __prelude_abort(int n) {
   exit(n);
 }
 
-void print(int n){
+void __prelude_print(int n){
   fprintf(stdout, "%d\n", n);
 }
 
-void print_err(int n) {
+void __prelude_print_err(int n) {
   fprintf(stderr, "%d\n", n);
 }
