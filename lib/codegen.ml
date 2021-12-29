@@ -151,6 +151,27 @@ and _eval_stmt node fun_env =
     let _ = _eval_stmt s1 fun_env in 
     let _ = Llvm.build_br condbb fun_env.ibuilder in 
     Llvm.position_at_end after_loop fun_env.ibuilder;
+  | Ast.For(e1, e2, e3, s) ->
+    let condbb = Llvm.append_block global_context "fcond" fun_env.fun_def in
+    let loopbb = Llvm.append_block global_context "floop" fun_env.fun_def in
+    let after_loopbb = Llvm.append_block global_context "fafter_loop" fun_env.fun_def in 
+    let _ = match e1 with None -> () | Some e1 -> ignore (_eval_exp e1 fun_env) in 
+    let _ = Llvm.build_br condbb fun_env.ibuilder in 
+    Llvm.position_at_end condbb fun_env.ibuilder;
+    (* Inside condbb *)
+    let _ = match e2 with
+    | None -> ()
+    | Some e2 -> 
+      let e2 = _eval_exp e2 fun_env in
+      let _ = Llvm.build_cond_br e2 loopbb after_loopbb fun_env.ibuilder in ()
+    in
+    Llvm.position_at_end loopbb fun_env.ibuilder;
+    (* Inside loopbb *)
+    let _ = _eval_stmt s fun_env in 
+    let _ = match e3 with None -> () | Some e3 -> ignore (_eval_exp e3 fun_env) in 
+    let _ = Llvm.build_br condbb fun_env.ibuilder in 
+    (* After loop body *)
+    Llvm.position_at_end after_loopbb fun_env.ibuilder;
   | Ast.Block(b) ->
     (* We are entering in a new inner block. *)
     (* Push a new block inside the symbol table. *)
@@ -163,7 +184,6 @@ and _eval_stmt node fun_env =
     let _ = Llvm.build_ret (_eval_exp e fun_env) fun_env.ibuilder in ()
   | Ast.Return(None) -> 
     let _ = Llvm.build_ret_void fun_env.ibuilder in ()
-  | _ -> ignore_pattern ()
 and _eval_stmtordec node fun_env = 
   match node.Ast.node with
   | Ast.LocalDecl(vid, vtyp) -> 
