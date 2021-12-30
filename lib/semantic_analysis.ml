@@ -496,9 +496,16 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
 
     (* Function to perform the linking phase to qualify the function call to an interface *)
     let perform_call_linking name fsym_attr = 
+        let rec type_check_actuals formals actuals = 
+          match (formals, actuals) with
+          | ([], []) -> true
+          | (h1::t1, h2::t2) when (Ast.equal_typ h1 h2) -> type_check_actuals t1 t2
+          | (h1::t1, (Ast.TRef(h2))::t2) when (Ast.equal_typ h1 h2) -> type_check_actuals t1 t2
+          | _ -> false
+        in
         (* Evaluate the actual paramaters to get info about the types *)
         let new_exp_actual_list = List.map (fun x -> _type_check_expr component_ast_node component_sym function_sym_tbl x) exp_actual_list in
-        let actuals_type = List.map (fun x -> match x.Ast.annot with Ast.TArray(i, _) -> Ast.TArray(i, None) | Ast.TRef(t) -> t | _ -> x.Ast.annot) new_exp_actual_list in 
+        let actuals_type = List.map (fun x -> match x.Ast.annot with Ast.TArray(i, _) -> Ast.TArray(i, None) | _ -> x.Ast.annot) new_exp_actual_list in 
         match fsym_attr.typ with 
         | Ast.TFun(formals_type, rtype) ->  
           let length_formals = (List.length formals_type) in 
@@ -509,7 +516,7 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
             raise (Semantic_error(loc, msg))
           else
             (* If each type of the actual match with the formals then success! *)
-            if List.equal Ast.equal_typ formals_type actuals_type then
+            if type_check_actuals formals_type actuals_type then
               (Ast.Call(name, fname, new_exp_actual_list)) @> rtype
             else
               raise (Semantic_error(loc, "The arguments type provided to the function call are wrong!\n" ))
