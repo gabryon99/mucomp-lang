@@ -5,6 +5,7 @@ interface Setter {
 component CSetter provides Setter {
   def setElement(i : int, a : int[], n : int) : void {
     a[i] = n;
+    return;
   }
 }
 

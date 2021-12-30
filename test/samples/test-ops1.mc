@@ -4,6 +4,7 @@ component EntryPoint provides App {
       print(1);
     else
       print(0);
+    return;
   }
 
   def main() : int {

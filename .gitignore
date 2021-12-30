@@ -7,6 +7,7 @@
 *.cmx
 *.cmxs
 *.cmxa
+*.out
 
 # ocamlbuild working directory
 _build/
@@ -29,3 +30,5 @@ setup.log
 _opam/
 
 .DS_STORE
+
+debug.log

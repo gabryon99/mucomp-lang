@@ -14,15 +14,21 @@ The snippet below shows a simple program written in μcomp.
 
 component EntryPoint provides App {
 
+    def fib(n: int): int {
+        if (n == 0) {
+            return 0;
+        }
+
+        if (n == 1) {
+            return 1;
+        }
+
+        return fib(n - 1) + fib(n - 2);
+    }
+
     def main() : int {
-
-        var foo : int;
-        var bar : int;
-
-        foo = 25;
-        bar = 42;
-
-        return foo + bar;
+        print(fib(10)); // prints 10
+        return 0;
     }
 }
 
