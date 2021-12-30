@@ -20,6 +20,14 @@ void __prelude_print(int n){
   fprintf(stdout, "%d\n", n);
 }
 
+void __prelude_putc(char c) {
+  fprintf(stdout, "%c", c);
+}
+
+void __prelude_putendl() {
+  fprintf(stdout, "\n");
+}
+
 void __prelude_print_err(int n) {
   fprintf(stderr, "%d\n", n);
 }
