@@ -1,6 +1,9 @@
 open Ast 
 
 let prelude_signature = [
+  "time", TFun([], TInt);
+  "set_rand_seed", TFun([TInt], TVoid);
+  "rand", TFun([], TInt);
   "print", TFun([TInt],TVoid);
   "putc", TFun([TChar], TVoid);
   "putendl", TFun([], TVoid);

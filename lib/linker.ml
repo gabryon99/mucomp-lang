@@ -8,6 +8,7 @@ and symbol_table = (symbol) Symbol_table.t
 let ignore_pattern () = failwith "Should not happen"
 let (@>) node annot = Ast.make_node node annot
 
+
 let check_connections ast =
   let rec visit_components components component_sym_table = match components with
   | [] -> component_sym_table 
