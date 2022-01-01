@@ -95,7 +95,6 @@ component EntryPoint provides App {
     var exp: int;
 
     base = get_number('b');
-    print(base);
     exp = get_number('e');
 
     print(exp_by_squaring(base, exp));

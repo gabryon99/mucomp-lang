@@ -2,8 +2,11 @@ open Ast
 
 let prelude_signature = [
   "print", TFun([TInt],TVoid);
+  "putc", TFun([TChar], TVoid);
+  "putendl", TFun([], TVoid);
   "print_err", TFun([TInt],TVoid);
   "getint", TFun([], TInt);
+  "getchar", TFun([], TChar);
   "abort", TFun([TInt], TVoid);
 ]
 
