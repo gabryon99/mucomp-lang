@@ -13,6 +13,7 @@
       | (Ast.ComponentDef(comp_node))::t -> aux interfaces (comp_node::components) connections t
       | (Ast.ConnectionDef(conns)::t) -> aux interfaces components (conns@connections) t
     in aux [] [] [] decls
+  
 %} 
 
 /* Token declarations */
@@ -70,16 +71,22 @@
 %token M_DIV
 %token M_MOD
 
+%token O_PLUS_ASSIGN  // +=
+%token O_MINUS_ASSIGN // -=
+%token O_TIMES_ASSIGN // *=
+%token O_DIV_ASSIGN   // /=
+%token O_MOD_ASSIGN   // %=
+
 (* Other operators *)
 %token O_ASSIGN
 %token O_REF
 
 (* Symbols *)
-%token L_PAREN R_PAREN
+%token L_PAREN R_PAREN // `(`, `)`
 
-%token L_BRACKET R_BRACKET
+%token L_BRACKET R_BRACKET // `{`, `}`
 
-%token L_SQUARE R_SQUARE
+%token L_SQUARE R_SQUARE // `[`, `]`
 
 %token DOT
 %token COMMA
@@ -91,7 +98,7 @@
 %nonassoc  K_IF
 %nonassoc  K_ELSE
 
-%right    O_ASSIGN
+%right    O_ASSIGN O_PLUS_ASSIGN O_MINUS_ASSIGN O_TIMES_ASSIGN O_DIV_ASSIGN O_MOD_ASSIGN
 
 %left     L_OR_OR
 %left     L_AND_AND
@@ -256,6 +263,31 @@ expr:
   }
   | lv = l_value O_ASSIGN e = expr {
     (Ast.Assign(lv, e)) @> $loc
+  }
+  | lv = l_value O_PLUS_ASSIGN e = expr {
+    let lv_exp = Ast.LV(lv) @> $loc in
+    let final_exp = (Ast.BinaryOp(Ast.Add, lv_exp, e)) @> $loc in 
+    (Ast.Assign(lv, final_exp)) @> $loc
+  }
+  | lv = l_value O_MINUS_ASSIGN e = expr {
+    let lv_exp = Ast.LV(lv) @> $loc in
+    let final_exp = (Ast.BinaryOp(Ast.Sub, lv_exp, e)) @> $loc in 
+    (Ast.Assign(lv, final_exp)) @> $loc
+  }
+  | lv = l_value O_TIMES_ASSIGN e = expr {
+    let lv_exp = Ast.LV(lv) @> $loc in
+    let final_exp = (Ast.BinaryOp(Ast.Mult, lv_exp, e)) @> $loc in 
+    (Ast.Assign(lv, final_exp)) @> $loc
+  }
+  | lv = l_value O_DIV_ASSIGN e = expr {
+    let lv_exp = Ast.LV(lv) @> $loc in
+    let final_exp = (Ast.BinaryOp(Ast.Div, lv_exp, e)) @> $loc in 
+    (Ast.Assign(lv, final_exp)) @> $loc
+  }
+  | lv = l_value O_MOD_ASSIGN e = expr {
+    let lv_exp = Ast.LV(lv) @> $loc in
+    let final_exp = (Ast.BinaryOp(Ast.Mod, lv_exp, e)) @> $loc in 
+    (Ast.Assign(lv, final_exp)) @> $loc
   }
 
   | M_MINUS e = expr {

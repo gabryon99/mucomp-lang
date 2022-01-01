@@ -120,6 +120,11 @@ rule next_token = parse
 
   (* Other operators *)
   | '='                 { O_ASSIGN }
+  | "+="                { O_PLUS_ASSIGN }
+  | "-="                { O_MINUS_ASSIGN }
+  | "*="                { O_TIMES_ASSIGN }
+  | "/="                { O_DIV_ASSIGN }
+  | "%="                { O_MOD_ASSIGN }
   | '&'                 { O_REF }
 
   (* Symbols *)

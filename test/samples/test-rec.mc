@@ -1,3 +1,6 @@
+/**
+* Some recursive functions for testing.
+*/
 component EntryPoint provides App {
 
   def fib(n: int): int {
