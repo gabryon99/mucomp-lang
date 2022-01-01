@@ -242,10 +242,10 @@ and eval_exp node fun_env =
       | Ast.Mod -> Llvm.build_urem new_e1 new_e2 "temp.rem" fun_env.ibuilder
       | Ast.Equal -> Llvm.build_icmp (Llvm.Icmp.Eq) new_e1 new_e2 "temp.eq" fun_env.ibuilder
       | Ast.Neq -> Llvm.build_icmp (Llvm.Icmp.Ne) new_e1 new_e2 "temp.neq" fun_env.ibuilder
-      | Ast.Less -> Llvm.build_icmp (Llvm.Icmp.Ult) new_e1 new_e2 "temp.less" fun_env.ibuilder
-      | Ast.Leq -> Llvm.build_icmp (Llvm.Icmp.Ule) new_e1 new_e2 "temp.leq" fun_env.ibuilder
-      | Ast.Greater -> Llvm.build_icmp (Llvm.Icmp.Ugt) new_e1 new_e2 "temp.greater" fun_env.ibuilder
-      | Ast.Geq -> Llvm.build_icmp (Llvm.Icmp.Uge) new_e1 new_e2 "temp.geq" fun_env.ibuilder
+      | Ast.Less -> Llvm.build_icmp (Llvm.Icmp.Slt) new_e1 new_e2 "temp.less" fun_env.ibuilder
+      | Ast.Leq -> Llvm.build_icmp (Llvm.Icmp.Sle) new_e1 new_e2 "temp.leq" fun_env.ibuilder
+      | Ast.Greater -> Llvm.build_icmp (Llvm.Icmp.Sgt) new_e1 new_e2 "temp.greater" fun_env.ibuilder
+      | Ast.Geq -> Llvm.build_icmp (Llvm.Icmp.Sge) new_e1 new_e2 "temp.geq" fun_env.ibuilder
       | Ast.And -> Llvm.build_and new_e1 new_e2 "temp.and" fun_env.ibuilder
       | Ast.Or -> Llvm.build_or new_e1 new_e2 "temp.or" fun_env.ibuilder
     end
@@ -307,7 +307,7 @@ and eval_stmt node fun_env =
     ignore(Llvm.build_cond_br guard_exp loopbb after_loop fun_env.ibuilder);
     Llvm.position_at_end loopbb fun_env.ibuilder;
     let has_return = eval_stmt s1 fun_env in
-    ignore(Llvm.build_br condbb fun_env.ibuilder);
+    if has_return then () else ignore(Llvm.build_br condbb fun_env.ibuilder);
     Llvm.position_at_end after_loop fun_env.ibuilder;
     has_return
 
@@ -329,7 +329,7 @@ and eval_stmt node fun_env =
     (* Inside loopbb *)
     let has_return = eval_stmt for_body fun_env in
     let _ = match e3 with None -> () | Some e3 -> ignore (eval_exp e3 fun_env) in 
-    ignore(Llvm.build_br condbb fun_env.ibuilder);
+    if has_return then () else ignore(Llvm.build_br condbb fun_env.ibuilder);
     (* After loop body *)
     Llvm.position_at_end after_loopbb fun_env.ibuilder;
     has_return
