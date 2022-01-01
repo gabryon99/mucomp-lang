@@ -505,7 +505,7 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
         in
         (* Evaluate the actual paramaters to get info about the types *)
         let new_exp_actual_list = List.map (fun x -> _type_check_expr component_ast_node component_sym function_sym_tbl x) exp_actual_list in
-        let actuals_type = List.map (fun x -> match x.Ast.annot with Ast.TArray(i, _) -> Ast.TArray(i, None) | _ -> x.Ast.annot) new_exp_actual_list in 
+        let actuals_type = List.map (fun x -> match x.Ast.annot with Ast.TArray(i, _) -> (Ast.TArray(i, None)) | _ -> x.Ast.annot) new_exp_actual_list in 
         match fsym_attr.typ with 
         | Ast.TFun(formals_type, rtype) ->  
           let length_formals = (List.length formals_type) in 
