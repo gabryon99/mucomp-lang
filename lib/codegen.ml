@@ -162,30 +162,21 @@ let remove_empty_blocks fun_env =
   ) [] fun_env.fun_def in
   List.iter (fun bb -> Llvm.delete_block bb) to_delete
 
-let rec _eval_lv ?(acc_index = false) node fun_env load =
+let rec _eval_lv node fun_env load =
   match (node.Ast.node, node.Ast.annot) with
   | (Ast.AccVar(None, vid), typ) -> 
-    begin 
-      try
-        let var = Symbol_table.lookup vid fun_env.fsym_table in
-        if load then 
-          begin
-            match typ with
-            | Ast.TRef(_) ->
-              let lltemp = Llvm.build_load var vid fun_env.ibuilder in 
-              Llvm.build_load lltemp vid fun_env.ibuilder
-            | Ast.TArray(_, _) ->
-              Llvm.build_in_bounds_gep var [|(Llvm.const_int i32_type 0); (Llvm.const_int i32_type 0)|] "" fun_env.ibuilder
-            | _ -> Llvm.build_load var vid fun_env.ibuilder 
-          end
-        else 
-          if acc_index then 
-            Llvm.build_load var vid fun_env.ibuilder
-          else 
-            var
-      with Symbol_table.MissingEntry(_) ->
-        raise (Codegen_error("Variable not found inside the scope"))
+    let lv_llvalue = Symbol_table.lookup vid fun_env.fsym_table in 
+    begin
+      match typ with
+      | Ast.TRef(_) ->
+        let l1 = Llvm.build_load lv_llvalue "" fun_env.ibuilder in
+        if load then Llvm.build_load l1 "" fun_env.ibuilder else l1
+      | Ast.TArray(_, Some _) ->
+        Llvm.build_in_bounds_gep lv_llvalue [|(Llvm.const_int i32_type 0); (Llvm.const_int i32_type 0)|] "" fun_env.ibuilder
+      | _ ->
+        if load then Llvm.build_load lv_llvalue "" fun_env.ibuilder else lv_llvalue
     end
+
   | (Ast.AccVar(Some cname, vid), _) -> 
     let mangled_name = name_mangling cname vid in
     let global_var = Llvm.lookup_global mangled_name fun_env.current_module in
@@ -196,24 +187,33 @@ let rec _eval_lv ?(acc_index = false) node fun_env load =
     end
 
   | (Ast.AccIndex(lv, exp), _) ->
-    let llv_exp = eval_exp exp fun_env in
-    begin
-      match lv.Ast.annot with
-      | Ast.TArray(_, Some _) ->
-        let llv_lv = _eval_lv lv fun_env false ~acc_index:false in
-        let t = Llvm.build_in_bounds_gep llv_lv [|(Llvm.const_int i32_type 0); llv_exp|] "" fun_env.ibuilder in
-        if load then
-          Llvm.build_load t "" fun_env.ibuilder
-        else
-          t
-      | _ ->
-        let llv_lv = _eval_lv lv fun_env false ~acc_index:true in 
-        let t = Llvm.build_in_bounds_gep llv_lv [|llv_exp|] "" fun_env.ibuilder in
-        if load then 
-          Llvm.build_load t "" fun_env.ibuilder
-        else 
-          t
-    end
+    let aux' lv idx = match lv.Ast.node with
+    | Ast.AccVar(Some _, _) -> failwith "Not implemented, yet."
+    | Ast.AccVar(None, vid) ->
+      let lv_llvalue = Symbol_table.lookup vid fun_env.fsym_table in
+      begin
+        Llvm.dump_value lv_llvalue;
+        match (lv.Ast.annot) with
+        | Ast.TArray(_, Some _) ->
+          let array_element = Llvm.build_in_bounds_gep lv_llvalue [|(Llvm.const_int i32_type 0); idx|] "" fun_env.ibuilder in
+          if load then
+            Llvm.build_load array_element "" fun_env.ibuilder
+          else
+            array_element
+        | Ast.TArray(_, None)
+        | Ast.TRef(_) ->
+          let loaded_address = Llvm.build_load lv_llvalue "" fun_env.ibuilder in
+          let array_element = Llvm.build_in_bounds_gep loaded_address [|idx|] "" fun_env.ibuilder in
+          if load then
+            Llvm.build_load array_element "" fun_env.ibuilder
+          else
+            array_element
+        | _ -> failwith "Nop"
+      end
+    | _ -> ignore_pattern () 
+    in
+    let llv_exp = eval_exp exp fun_env in aux' lv llv_exp
+    
 and eval_exp node fun_env = 
   match node.Ast.node with
   | Ast.LV(lv) -> 
@@ -272,7 +272,9 @@ and eval_exp node fun_env =
       | (Some func, _) ->
         Llvm.build_call func new_exp_array ("call." ^ fun_name) fun_env.ibuilder
     end
+
   | _ -> ignore_pattern ()    
+
 and eval_stmt node fun_env =
   match node.Ast.node with
   | Ast.Expr(e) -> ignore(eval_exp e fun_env); false

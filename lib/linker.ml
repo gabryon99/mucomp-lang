@@ -157,7 +157,7 @@ and visit_component_definitions current_comp_name component_link_table acc = fun
       visit_component_definitions current_comp_name component_link_table (new_fun_decl::acc) tail
     | Ast.FunDecl({Ast.body = None; _}) -> ignore_pattern ()
 and qualify_components acc global_table = function
-  | [] -> List.rev acc 
+  | [] -> acc 
   | annotated_node::tail ->
     match (annotated_node.Ast.node) with 
     | Ast.ComponentDecl(comp) ->
