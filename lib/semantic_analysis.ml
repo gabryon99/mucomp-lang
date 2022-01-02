@@ -321,28 +321,38 @@ let first_pass ast global_table =
   let global_table = check_main_components global_table false components in
   global_table
 
-let _check_local_decl_type annotated_node = 
+let check_local_decl_type annotated_node =
   let node = annotated_node.Ast.node in 
   let loc = annotated_node.Ast.annot in 
-  match node with 
-  | Ast.LocalDecl(_, Ast.TVoid) -> raise (Semantic_error(loc, "Cannot declare variables of type void!"))
-  | Ast.LocalDecl(_, Ast.TArray(_, Some n)) when n <= 0 -> raise (Semantic_error(loc, "The array size cannot be less than 0!"))
-  | Ast.LocalDecl(_, Ast.TArray(t, _)) when not(Ast.is_scalar_type t) -> raise (Semantic_error(loc, "Only arrays of scalar types are allowed!"))
-  | Ast.LocalDecl(_, _) -> ()
-  | Ast.Stmt(_) -> ignore_pattern ()
+  let local_decl_typ = match node with Ast.LocalDecl(_, t) -> t | Ast.LocalDeclAndInit((_, t), _) -> t | _ -> ignore_pattern () in
+  match local_decl_typ with 
+  | Ast.TVoid -> raise (Semantic_error(loc, "Cannot declare variables of type void!"))
+  | Ast.TArray(_, Some n) when n <= 0 -> raise (Semantic_error(loc, "The array size cannot be less than 0!"))
+  | Ast.TArray(t, _) when not(Ast.is_scalar_type t) -> raise (Semantic_error(loc, "Only arrays of scalar types are allowed!"))
+  | _ -> ()
 
-
-let _check_fun_rtype annotated_node = 
+let check_fun_return_type annotated_node = 
   let node = annotated_node.Ast.node in
-  let loc = annotated_node.Ast.annot in 
-  match node with
-  | Ast.FunDecl({Ast.rtype = rtype; _}) -> 
-    begin
-      match rtype with 
-      | Ast.TInt | Ast.TBool | Ast.TChar | Ast.TVoid -> ()
-      | _  -> raise (Semantic_error(loc, "A function can only returns int, bool, char or void."))
-    end
-  | Ast.VarDecl(_) -> ignore_pattern ()
+  let loc = annotated_node.Ast.annot in
+  let rtype = match node with Ast.FunDecl({Ast.rtype = rtype; _}) -> rtype | _ -> ignore_pattern () in
+  match rtype with 
+  | Ast.TInt | Ast.TBool | Ast.TChar | Ast.TVoid -> ()
+  | _  -> raise (Semantic_error(loc, "A function can only returns int, bool, char or void."))
+
+let type_check_assign typ1 typ2 =
+  match (typ1, typ2) with 
+  (* Case: T1 <- T2 <== T1=T2 && Scalar(T1) *)
+  | (t1, t2) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> Result.ok true
+  (* Case: T1 <- &T1 <== Scalar(T1) *)
+  | (t1, Ast.TRef(t2)) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> Result.ok true
+  (* Case: &T1 <- &T2 <== T1==T2 && Scalar(T1) *)
+  | (Ast.TRef(t1), Ast.TRef(t2)) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> Result.ok true
+  (* Case: &T1 <- T2 <== T1==T2 && Scalar(T1) *)
+  | (Ast.TRef(t1), t2) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> Result.ok true
+  (* Error Cases *)
+  | (Ast.TArray(_), Ast.TArray(_)) -> Result.error "Arrays cannot be assigned!"
+  | (_, Ast.TVoid) -> Result.error "Cannot assign the void type to a variable!"
+  | (t1, t2) -> Result.error (Printf.sprintf "Assignment not allowed. You cannot assign a %s to a %s variable!" (Ast.show_type t2) (Ast.show_type t1))
 
 let rec type_check_lvalue component_ast_node component_sym function_sym_tbl annotated_lv = 
   let node = annotated_lv.Ast.node in 
@@ -354,7 +364,7 @@ let rec type_check_lvalue component_ast_node component_sym function_sym_tbl anno
       match (lv_new_node) with
       | {Ast.node = Ast.AccIndex(_, _); _} -> ignore_pattern ()
       | {Ast.node = Ast.AccVar(_, _); annot = lv_typ} -> 
-        let exp_new_node = _type_check_expr component_ast_node component_sym function_sym_tbl exp in 
+        let exp_new_node = type_check_expr component_ast_node component_sym function_sym_tbl exp in 
         (* Let's ensure exp_new_node has a TInt type *)
         begin
           match (exp_new_node) with 
@@ -385,41 +395,33 @@ let rec type_check_lvalue component_ast_node component_sym function_sym_tbl anno
         end
     end
   | _ -> ignore_pattern ()
-and _type_check_expr component_ast_node component_sym function_sym_tbl annotated_expr = 
+and type_check_expr component_ast_node component_sym function_sym_tbl annotated_expr = 
   let node = annotated_expr.Ast.node in 
   let loc = annotated_expr.Ast.annot in 
   match node with
+
   | Ast.LV(lv) -> 
     let new_node_lv = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
     begin
       match (new_node_lv) with
       | {Ast.annot = typ; _} -> (Ast.LV(new_node_lv)) @> typ
     end
+
   | Ast.Assign(lv, e) ->
-    let _new_node_lv = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
-    let _new_node_exp = _type_check_expr component_ast_node component_sym function_sym_tbl e in
-    (* Main body of type checking *)
-    begin
-      match (_new_node_lv, _new_node_exp) with 
-      (* Case: T1 <- T2 <== T1=T2 && Scalar(T1) *)
-      | ({Ast.annot = t1; _}, {Ast.annot = t2; _}) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> (Ast.Assign(_new_node_lv, _new_node_exp)) @> Ast.TInt
-      (* Case: T1 <- &T1 <== Scalar(T1) *)
-      | ({Ast.annot = t1; _}, {Ast.annot = Ast.TRef(t2); _}) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> (Ast.Assign(_new_node_lv, _new_node_exp)) @> Ast.TInt
-      (* Case: &T1 <- &T2 <== T1==T2 && Scalar(T1) *)
-      | ({Ast.annot = Ast.TRef(t1); _}, {Ast.annot = Ast.TRef(t2); _}) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> (Ast.Assign(_new_node_lv, _new_node_exp)) @> Ast.TInt
-      (* Case: &T1 <- T2 <== T1==T2 && Scalar(T1) *)
-      | ({Ast.annot = Ast.TRef(t1); _}, {Ast.annot = t2; _}) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> (Ast.Assign(_new_node_lv, _new_node_exp)) @> Ast.TInt
-      
-      (* Error Cases *)
-      | ({Ast.annot = Ast.TArray(_); _}, {Ast.annot = Ast.TArray(_); _}) -> raise (Semantic_error(loc, "Arrays cannot be assigned!"))
-      | ({Ast.annot = _; _}, {Ast.annot = Ast.TVoid; _}) -> raise (Semantic_error(loc, "Cannot assign void to a variable!"))
-      | ({Ast.annot = t1; _}, {Ast.annot = t2; _}) -> raise (Semantic_error(loc, (Printf.sprintf "Assignment not allowed! %s vs %s" (Ast.show_typ t1) (Ast.show_typ t2) )))
-    end
+    let new_node_lv = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
+    let new_node_exp = type_check_expr component_ast_node component_sym function_sym_tbl e in
+    let type_check_res = type_check_assign new_node_lv.Ast.annot new_node_exp.Ast.annot in 
+    if Result.is_ok type_check_res then
+      (Ast.Assign(new_node_lv, new_node_exp)) @> (new_node_lv.Ast.annot)
+    else
+      raise (Semantic_error(loc, Result.get_error type_check_res))
+
   | Ast.ILiteral(i) -> (Ast.ILiteral(i)) @> Ast.TInt
   | Ast.CLiteral(c) -> (Ast.CLiteral(c)) @> Ast.TChar
   | Ast.BLiteral(b) -> (Ast.BLiteral(b)) @> Ast.TBool
+
   | Ast.UnaryOp(uop, exp) ->
-    let new_node_exp = _type_check_expr component_ast_node component_sym function_sym_tbl exp in 
+    let new_node_exp = type_check_expr component_ast_node component_sym function_sym_tbl exp in 
     begin
       match (uop, new_node_exp.Ast.annot) with
       | (Ast.Neg, Ast.TInt) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TInt
@@ -432,19 +434,22 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
       | (Ast.Not, Ast.TInt) -> raise (Semantic_error(loc, "Not operator cannot be applied to an integer!"))
       | _ -> raise (Semantic_error(loc, "Invalid unary operator expression!"))
     end
-  (* | Ast.DoubleOp(dop, dop_prec, lv) ->
-    let new_lv_node = _type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
+
+  | Ast.DoubleOp(dop, dop_prec, lv) ->
+    let new_lv_node = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
     begin
       match (new_lv_node.Ast.annot) with 
       | Ast.TInt -> (Ast.DoubleOp(dop, dop_prec, new_lv_node)) @> (Ast.TInt)
       | _ -> raise (Semantic_error(loc, "Increment/decrement operator can be applied only to integer variables!")) 
-    end *)
+    end
+
   | Ast.Address(lv) ->
     let new_lv_node = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
     (Ast.Address(new_lv_node)) @> (Ast.TRef(new_lv_node.Ast.annot))
+
   | Ast.BinaryOp(binop, exp1, exp2) ->
-    let new_node_exp1 = _type_check_expr component_ast_node component_sym function_sym_tbl exp1 in 
-    let new_node_exp2 = _type_check_expr component_ast_node component_sym function_sym_tbl exp2 in 
+    let new_node_exp1 = type_check_expr component_ast_node component_sym function_sym_tbl exp1 in 
+    let new_node_exp2 = type_check_expr component_ast_node component_sym function_sym_tbl exp2 in 
     begin
       let typ1 = new_node_exp1.Ast.annot in 
       let typ2 = new_node_exp2.Ast.annot in 
@@ -504,7 +509,7 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
           | _ -> false
         in
         (* Evaluate the actual paramaters to get info about the types *)
-        let new_exp_actual_list = List.map (fun x -> _type_check_expr component_ast_node component_sym function_sym_tbl x) exp_actual_list in
+        let new_exp_actual_list = List.map (fun x -> type_check_expr component_ast_node component_sym function_sym_tbl x) exp_actual_list in
         let actuals_type = List.map (fun x -> match x.Ast.annot with Ast.TArray(i, _) -> (Ast.TArray(i, None)) | _ -> x.Ast.annot) new_exp_actual_list in 
         match fsym_attr.typ with 
         | Ast.TFun(formals_type, rtype) ->  
@@ -561,18 +566,20 @@ and _type_check_expr component_ast_node component_sym function_sym_tbl annotated
           (* inside the provided interfaces... *)
           lookup_provided_interfaces ("Prelude"::comp_uses_identifiers)
     end
-  | _ -> ignore_pattern ()
-and _type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_tbl) annotated_stmt = 
+  | _ -> 
+    (Printf.printf "%s\n\n" (Ast.show_expr_node (fun _ _ -> ()) node));
+    ignore_pattern ()
+and type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_tbl) annotated_stmt = 
   let node = annotated_stmt.Ast.node in 
   let loc = annotated_stmt.Ast.annot in
   match node with
   | Ast.If(b_expr, then_stmt, else_stmt) ->
-    let new_bexp = _type_check_expr component_ast_node component_sym function_sym_tbl b_expr in
+    let new_bexp = type_check_expr component_ast_node component_sym function_sym_tbl b_expr in
     let sym_table = Symbol_table.begin_block function_sym_tbl in
-    let new_then_stmt = _type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) then_stmt in 
+    let new_then_stmt = type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) then_stmt in 
     let sym_table = Symbol_table.end_block sym_table in 
     let sym_table = Symbol_table.begin_block sym_table in
-    let new_else_stmt = _type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) else_stmt in
+    let new_else_stmt = type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) else_stmt in
     begin
       let etyp = new_bexp.Ast.annot in 
       match etyp with 
@@ -580,9 +587,9 @@ and _type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_t
       | _ -> raise (Semantic_error(loc, "The if guard does not evaluate to a boolean type!"))
     end
   | Ast.While(b_expr, wstmt) ->
-      let new_bexp = _type_check_expr component_ast_node component_sym function_sym_tbl b_expr in 
+      let new_bexp = type_check_expr component_ast_node component_sym function_sym_tbl b_expr in 
       let sym_table = Symbol_table.begin_block function_sym_tbl in
-      let new_wstmt = _type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) wstmt in 
+      let new_wstmt = type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) wstmt in 
       begin
         let etyp = new_bexp.Ast.annot in 
         match etyp with
@@ -590,25 +597,25 @@ and _type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_t
         | _ -> raise (Semantic_error(loc, "The while guard does not evaluate to a boolean type!"))
       end
   | Ast.Expr(e1) ->
-    let new_exp = _type_check_expr component_ast_node component_sym function_sym_tbl e1 in
+    let new_exp = type_check_expr component_ast_node component_sym function_sym_tbl e1 in
     let etyp = new_exp.Ast.annot in 
     (Ast.Expr(new_exp)) @> etyp
   | Ast.For(e1, e2, e3, for_stmt) ->
     let sym_table = Symbol_table.begin_block function_sym_tbl in
-    let new_for_stmt = _type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) for_stmt in
+    let new_for_stmt = type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) for_stmt in
     begin
       match (e1, e2, e3) with
       | (Some(e1), Some(e2), Some(e3)) ->
-        let new_e1 = _type_check_expr component_ast_node component_sym function_sym_tbl e1 in
-        let new_e2 = _type_check_expr component_ast_node component_sym function_sym_tbl e2 in
-        let new_e3 = _type_check_expr component_ast_node component_sym function_sym_tbl e3 in
+        let new_e1 = type_check_expr component_ast_node component_sym function_sym_tbl e1 in
+        let new_e2 = type_check_expr component_ast_node component_sym function_sym_tbl e2 in
+        let new_e3 = type_check_expr component_ast_node component_sym function_sym_tbl e3 in
         begin
           match (new_e2.Ast.annot) with
           | Ast.TBool -> (Ast.For(Some new_e1, Some new_e2, Some new_e3, new_for_stmt)) @> (Ast.TVoid)
           | _ -> raise (Semantic_error(loc, "The for guard is not a boolean expression!"))
         end
       | (None, Some(e2), None) ->
-        let new_e2 = _type_check_expr component_ast_node component_sym function_sym_tbl e2 in
+        let new_e2 = type_check_expr component_ast_node component_sym function_sym_tbl e2 in
         begin
           match (new_e2.Ast.annot) with
           | Ast.TBool -> (Ast.For(None, Some new_e2, None, new_for_stmt)) @> (Ast.TVoid)
@@ -619,29 +626,40 @@ and _type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_t
     end
   | Ast.Return(None) -> (Ast.Return(None)) @> Ast.TVoid
   | Ast.Return(Some(exp)) ->
-      let new_exp = _type_check_expr component_ast_node component_sym function_sym_tbl exp in 
-      (* Let's check if the expression type matchets with the function return type *)
+      let new_exp = type_check_expr component_ast_node component_sym function_sym_tbl exp in 
+      (* Let's check if the expression type matches with the function return type *)
       if Ast.equal_typ (new_exp.Ast.annot) (fun_rtype) then
         (Ast.Return(Some(new_exp))) @> (new_exp.Ast.annot)
       else
         raise (Semantic_error(loc, "The expression returned by the function does not match the function return type!"))
+  
   | Ast.Block(stmts) ->
-    (* create a new block in symbol table *)
-    let _type_check_stmtordec annotated_node sym_tbl =
-      let n = annotated_node.Ast.node in 
-      let _l = annotated_node.Ast.annot in
-      match n with
+    (* Create a new block inside the symbol table *)
+    let type_check_stmtordec annotated_node (fun_rtype, sym_table) =
+      match (annotated_node.Ast.node) with
+      | Ast.LocalDeclAndInit((_, typ) as decl, exp) ->
+        let _ = check_local_decl_type annotated_node in
+        let new_exp = type_check_expr component_ast_node component_sym sym_table exp in
+        (* Let's ensure that expression type is the same as the variable declaration *)
+        let res_type_check = type_check_assign typ new_exp.Ast.annot in
+        if Result.is_ok res_type_check then
+          (Ast.LocalDeclAndInit(decl, new_exp)) @> Ast.TVoid 
+        else
+          raise (Semantic_error(loc, Result.get_error res_type_check))
+
       | Ast.LocalDecl(vdecl) -> 
-        let _ = _check_local_decl_type annotated_node in 
+        let _ = check_local_decl_type annotated_node in 
         (Ast.LocalDecl(vdecl)) @> Ast.TVoid
+
       | Ast.Stmt(stmt) ->
-        let new_stmt = _type_check_stmt component_ast_node component_sym  sym_tbl stmt  in 
+        let new_stmt = type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) stmt in 
         (Ast.Stmt(new_stmt)) @> Ast.TVoid
     in
-    let _fill_local_st sym_tbl annotated_node =
+    let aux_fill_local_st sym_tbl annotated_node =
       let n = annotated_node.Ast.node in 
       let l = annotated_node.Ast.annot in
       match n with
+      | Ast.LocalDeclAndInit((id, typ), _)
       | Ast.LocalDecl(id, typ) -> 
         begin
           try
@@ -650,12 +668,16 @@ and _type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_t
             let msg = Printf.sprintf "The variable %s has been declared twice!" id in 
             raise (Semantic_error(loc, msg))
         end
-      | _ -> sym_tbl
+      | _ -> sym_tbl 
     in
-    let sym_table = (Symbol_table.begin_block function_sym_tbl) in
-    let sym_table = List.fold_left _fill_local_st sym_table stmts in
-    let new_stmts = List.map (fun x -> _type_check_stmtordec x (fun_rtype, sym_table)) stmts in
-    (Ast.Block(new_stmts)) @> Ast.TVoid
+    let (_, new_stmts) = List.fold_left (fun (st, statements) stmt -> 
+      let st = aux_fill_local_st st stmt in
+      let stmt = type_check_stmtordec stmt (fun_rtype, st) in
+      (st, stmt::statements)
+    ) ((Symbol_table.begin_block function_sym_tbl), []) stmts in
+    
+    (Ast.Block(List.rev (new_stmts))) @> Ast.TVoid
+
   | Ast.Skip -> (Ast.Skip) @> Ast.TVoid
 
 (** The function performs type checking *)
@@ -668,11 +690,11 @@ let second_pass ast global_table =
     | Ast.VarDecl(vd) -> (Ast.VarDecl(vd)) @> (snd vd)
     | Ast.FunDecl({Ast.body = None; _}) -> ignore_pattern ()
     | Ast.FunDecl({Ast.rtype; Ast.fname; Ast.formals; body = Some(fbody)}) ->
-      let _ = _check_fun_rtype member_node in
+      let _ = check_fun_return_type member_node in
       let csym_tbl = (match local_sym with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore_pattern ()) in
       let fn_sym = Symbol_table.lookup fname csym_tbl in
       let fn_st = (match fn_sym with SFunction({fsym_tbl; _}) -> fsym_tbl | _ -> ignore_pattern ()) in
-      let new_body = _type_check_stmt ast_node local_sym (rtype, fn_st) fbody in
+      let new_body = type_check_stmt ast_node local_sym (rtype, fn_st) fbody in
       let formals_type = List.map (snd) formals in
       (Ast.FunDecl({Ast.rtype = rtype; fname = fname; formals = formals; body = Some(new_body)})) @> (Ast.TFun(formals_type, rtype))
   in

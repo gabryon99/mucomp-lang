@@ -173,7 +173,6 @@ var_sign:
   | id = ID COLON t = lang_type { (id, t) }
 ;
 
-
 fun_proto:
   | K_DEF fname = ID L_PAREN fp = separated_list(COMMA, var_sign) R_PAREN {
     Ast.make_fun_decl Ast.TVoid fname fp None
@@ -210,6 +209,7 @@ block:
 block_element:
   | s = stmt { (Ast.Stmt(s)) @> $loc }
   | K_VAR vs = var_sign SEMICOLON { (Ast.LocalDecl(vs)) @> $loc }
+  | K_VAR vs = var_sign O_ASSIGN e = expr SEMICOLON { (Ast.LocalDeclAndInit(vs, e)) @> $loc }
 ;
 
 lang_type:

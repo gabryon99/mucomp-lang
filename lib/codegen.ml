@@ -273,6 +273,29 @@ and eval_exp node fun_env =
         Llvm.build_call func new_exp_array ("call." ^ fun_name) fun_env.ibuilder
     end
 
+  | Ast.DoubleOp(dop, dop_prec, lv) ->
+    begin
+      let lv_llvalue = _eval_lv lv fun_env true in
+      let one_ll = Llvm.const_int i32_type 1 in
+      match (dop, dop_prec) with
+      | (Ast.PlusPlus, Ast.Post) ->
+        let plus_one = Llvm.build_add lv_llvalue one_ll "" fun_env.ibuilder in 
+        let _ = Llvm.build_store plus_one (_eval_lv lv fun_env false) fun_env.ibuilder in
+        lv_llvalue
+      | (Ast.PlusPlus, Ast.Pre) -> 
+        let plus_one = Llvm.build_add lv_llvalue one_ll "" fun_env.ibuilder in 
+        let _ = Llvm.build_store plus_one (_eval_lv lv fun_env false) fun_env.ibuilder in
+        plus_one
+      | (Ast.MinMin, Ast.Post) ->
+        let plus_one = Llvm.build_sub lv_llvalue one_ll "" fun_env.ibuilder in 
+        let _ = Llvm.build_store plus_one (_eval_lv lv fun_env false) fun_env.ibuilder in
+        lv_llvalue
+      | (Ast.MinMin, Ast.Pre) -> 
+        let plus_one = Llvm.build_sub lv_llvalue one_ll "" fun_env.ibuilder in 
+        let _ = Llvm.build_store plus_one (_eval_lv lv fun_env false) fun_env.ibuilder in
+        plus_one
+    end
+
   | _ -> ignore_pattern ()    
 
 and eval_stmt node fun_env =
@@ -345,7 +368,6 @@ and eval_stmt node fun_env =
     has_return
 
   | Ast.Return(Some e) ->
-    
     let ll_exp = (eval_exp e fun_env) in
     ignore(Llvm.build_ret ll_exp fun_env.ibuilder);
     true
@@ -359,6 +381,16 @@ and eval_stmtordec node fun_env =
   | Ast.LocalDecl(vid, vtyp) -> 
     (* Put llvalue inside the current block *)
     let llvalue = aux_build_alloca vid vtyp fun_env.ibuilder in 
+    (* Update symbol table *)
+    fun_env.fsym_table <- Symbol_table.add_entry vid llvalue fun_env.fsym_table;
+    false
+  | Ast.LocalDeclAndInit((vid, vtyp), exp) ->
+    (* Put llvalue inside the current block *)
+    let llvalue = aux_build_alloca vid vtyp fun_env.ibuilder in 
+    (* Evaluate expression *)
+    let llv_exp = eval_exp exp fun_env in
+    (* Build store instruction. *)
+    ignore(Llvm.build_store llv_exp llvalue fun_env.ibuilder);
     (* Update symbol table *)
     fun_env.fsym_table <- Symbol_table.add_entry vid llvalue fun_env.fsym_table;
     false

@@ -143,6 +143,7 @@ and visit_stmts_list current_comp_name component_link_table acc = function
   | [] -> List.rev acc
   | annotated_node::tail -> 
     match (annotated_node.Ast.node) with 
+    | Ast.LocalDeclAndInit(_)
     | Ast.LocalDecl(_) -> visit_stmts_list current_comp_name component_link_table (annotated_node::acc) tail
     | Ast.Stmt(s) -> 
       let new_stmt = (Ast.Stmt(visit_statements current_comp_name component_link_table s)) @> (annotated_node.Ast.annot) in
@@ -157,6 +158,7 @@ and visit_component_definitions current_comp_name component_link_table acc = fun
       let new_fun_decl = Ast.FunDecl({fd with Ast.body = Some new_stmt}) @> (annotated_node.Ast.annot) in 
       visit_component_definitions current_comp_name component_link_table (new_fun_decl::acc) tail
     | Ast.FunDecl({Ast.body = None; _}) -> ignore_pattern ()
+
 and qualify_components acc global_table = function
   | [] -> List.rev acc 
   | annotated_node::tail ->
