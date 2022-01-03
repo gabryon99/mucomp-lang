@@ -17,12 +17,6 @@ let app_signature = [
   "main", TFun([],TInt)
 ]
 
-let list_remove element l = 
-  let rec aux acc = function
-  | [] -> acc
-  | h::t -> if h = element then aux acc t else aux (h::acc) t
-in aux [] l
-
 let list_are_disjoint l1 l2 =
   let rec aux = function
   | [] -> true
@@ -43,10 +37,10 @@ let list_zip_with_index l1 =
 let debug_fd = open_out "debug.log"
 
 (* Auxiliar function to print logs inside debug file *)
-let print_debug message = Printf.fprintf debug_fd "[info] :: %s\n" message
+let print_debug = Printf.fprintf debug_fd 
 
 (* At the program exit prints a log and close the debug file descriptor *)
 let _ = at_exit (fun _ ->
-  print_debug (Printf.sprintf "%s" "Terminating debug...");
+  print_debug "Terminating debug\n";
   close_out debug_fd
 ) 
