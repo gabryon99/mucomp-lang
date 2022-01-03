@@ -21,24 +21,6 @@ type comp_env = {
   global_env: global_env;
 }
 
-
-(* 
-* If an LLVM module contains error, the stdout will be deleted, therefore 
-* the logged messages are gone. To address this problem we use
-* a file called 'debug.log' to log the message and prevent their lost.
-*)
-let debug_fd = open_out "debug.log"
-
-(* Auxiliar function to print logs inside debug file *)
-let print_debug message = Printf.fprintf debug_fd "[info] :: %s\n" message
-let sprintf = Printf.sprintf
-
-(* At the program exit prints a log and close the debug file descriptor *)
-let _ = at_exit (fun _ ->
-  print_debug (sprintf "%s" "Terminating debug...");
-  close_out debug_fd
-) 
-
 (* Do name mangling using the component and member names. *)
 let name_mangling cname name = 
   Printf.sprintf "__%s_%s" (String.lowercase_ascii cname) (String.lowercase_ascii name)

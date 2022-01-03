@@ -34,3 +34,19 @@ let list_zip_with_index l1 =
   | [] -> acc
   | h::t -> aux (idx + 1) ((idx, h)::acc) t in 
   aux 0 [] l1
+
+(* 
+* If an LLVM module contains error, the stdout will be deleted, therefore 
+* the logged messages are gone. To address this problem we use
+* a file called 'debug.log' to log the message and prevent their lost.
+*)
+let debug_fd = open_out "debug.log"
+
+(* Auxiliar function to print logs inside debug file *)
+let print_debug message = Printf.fprintf debug_fd "[info] :: %s\n" message
+
+(* At the program exit prints a log and close the debug file descriptor *)
+let _ = at_exit (fun _ ->
+  print_debug (Printf.sprintf "%s" "Terminating debug...");
+  close_out debug_fd
+) 
