@@ -186,12 +186,9 @@ fun_proto:
 ;
 
 c_member_decl:
-  | K_VAR vs = var_sign SEMICOLON {
-    (Ast.VarDecl(vs)) @> $loc
-  }
-  | fd = fun_decl {
-    (Ast.FunDecl(fd)) @> $loc
-  }
+  | K_VAR vs = var_sign SEMICOLON { (Ast.VarDecl(vs)) @> $loc }
+  | K_VAR vs = var_sign O_ASSIGN e = expr SEMICOLON { (Ast.VarDeclAndInit(vs, e)) @> $loc }
+  | fd = fun_decl { (Ast.FunDecl(fd)) @> $loc }
 ;
 
 fun_decl:

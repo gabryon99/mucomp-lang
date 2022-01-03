@@ -8,6 +8,20 @@ type fun_env = {
   ibuilder: Llvm.llbuilder;                     (* The function instruction builder to emit code. *)
 }
 
+type global_env = {
+  global_module: Llvm.llmodule;
+  global_ctors: Llvm.llvalue * Llvm.llbuilder;
+  global_var_init: Llvm.llvalue * Llvm.llbuilder;
+}
+
+type comp_env = {
+  cname: string;
+  is_main: bool;
+  current_module: Llvm.llmodule;
+  global_env: global_env;
+}
+
+
 (* 
 * If an LLVM module contains error, the stdout will be deleted, therefore 
 * the logged messages are gone. To address this problem we use
@@ -17,10 +31,11 @@ let debug_fd = open_out "debug.log"
 
 (* Auxiliar function to print logs inside debug file *)
 let print_debug message = Printf.fprintf debug_fd "[info] :: %s\n" message
+let sprintf = Printf.sprintf
 
 (* At the program exit prints a log and close the debug file descriptor *)
 let _ = at_exit (fun _ ->
-  print_debug "Terminating debug...";
+  print_debug (sprintf "%s" "Terminating debug...");
   close_out debug_fd
 ) 
 
@@ -114,7 +129,6 @@ let unify_blocks f_rtype fun_env =
   in
   (* Count how many return instructions are inside the function. *)
   let block_containing_returns = Llvm.fold_left_blocks count_aux [] fun_env.fun_def |> List.rev in 
-  print_debug (Printf.sprintf "%d" (List.length block_containing_returns));
   match (List.length block_containing_returns) with
   | 0
   | 1 -> (* Leave as is... *) ()
@@ -162,15 +176,18 @@ let remove_empty_blocks fun_env =
   ) [] fun_env.fun_def in
   List.iter (fun bb -> Llvm.delete_block bb) to_delete
 
-let rec _eval_lv node fun_env load =
+let rec eval_lv ?(just_address=false) node fun_env load =
   match (node.Ast.node, node.Ast.annot) with
   | (Ast.AccVar(None, vid), typ) -> 
     let lv_llvalue = Symbol_table.lookup vid fun_env.fsym_table in 
     begin
       match typ with
       | Ast.TRef(_) ->
-        let l1 = Llvm.build_load lv_llvalue "" fun_env.ibuilder in
-        if load then Llvm.build_load l1 "" fun_env.ibuilder else l1
+        if just_address then 
+          lv_llvalue
+        else
+          let l1 = Llvm.build_load lv_llvalue "" fun_env.ibuilder in
+          if load then Llvm.build_load l1 "" fun_env.ibuilder else l1
       | Ast.TArray(_, Some _) ->
         Llvm.build_in_bounds_gep lv_llvalue [|(Llvm.const_int i32_type 0); (Llvm.const_int i32_type 0)|] "" fun_env.ibuilder
       | _ ->
@@ -214,14 +231,65 @@ let rec _eval_lv node fun_env load =
     in
     let llv_exp = eval_exp exp fun_env in aux' lv llv_exp
     
+and eval_bool_and_exp lhs rhs fun_env =
+
+  let llvalue_exp1 = eval_exp lhs fun_env in
+  let coming_bb1 = Llvm.insertion_block fun_env.ibuilder in
+
+  let true_bb = Llvm.append_block global_context "and.true" fun_env.fun_def in
+  let false_bb = Llvm.append_block global_context "and.false" fun_env.fun_def in
+
+  ignore(Llvm.build_cond_br llvalue_exp1 true_bb false_bb fun_env.ibuilder);
+  ignore(Llvm.position_at_end true_bb fun_env.ibuilder);
+
+  let llvalue_exp2 = eval_exp rhs fun_env in 
+  let coming_bb2 = Llvm.insertion_block fun_env.ibuilder in
+
+  ignore(Llvm.build_br false_bb fun_env.ibuilder);
+  ignore(Llvm.position_at_end false_bb fun_env.ibuilder);
+
+  let phi_node = Llvm.build_empty_phi i1_type "" fun_env.ibuilder in 
+  let incomings = [(llvalue_exp1, coming_bb1); (llvalue_exp2, coming_bb2)] in 
+  ignore(List.iter (fun p -> Llvm.add_incoming p phi_node) incomings);
+
+  phi_node
+
+and eval_bool_or_exp lhs rhs fun_env =
+
+  let llvalue_exp1 = eval_exp lhs fun_env in
+  let coming_bb1 = Llvm.insertion_block fun_env.ibuilder in
+
+  let false_bb = Llvm.append_block global_context "or.false" fun_env.fun_def in
+  let true_bb = Llvm.append_block global_context "or.true" fun_env.fun_def in
+
+  ignore(Llvm.build_cond_br llvalue_exp1 true_bb false_bb fun_env.ibuilder);
+  ignore(Llvm.position_at_end false_bb fun_env.ibuilder);
+
+  let llvalue_exp2 = eval_exp rhs fun_env in 
+  let coming_bb2 = Llvm.insertion_block fun_env.ibuilder in
+
+  ignore(Llvm.build_br true_bb fun_env.ibuilder);
+  ignore(Llvm.position_at_end true_bb fun_env.ibuilder);
+
+  let phi_node = Llvm.build_empty_phi i1_type "" fun_env.ibuilder in 
+  let incomings = [(llvalue_exp1, coming_bb1); (llvalue_exp2, coming_bb2)] in 
+  ignore(List.iter (fun p -> Llvm.add_incoming p phi_node) incomings);
+
+  phi_node
+
 and eval_exp node fun_env = 
   match node.Ast.node with
   | Ast.LV(lv) -> 
-    _eval_lv lv fun_env true 
+    eval_lv lv fun_env true 
 
   | Ast.Assign(lv, exp) ->
+
+    let j_address = match (lv.Ast.annot, exp.Ast.node) with 
+      | (Ast.TRef(_), Ast.Address(_)) -> true 
+      | _ -> false in
+
     let exp_llvalue = eval_exp exp fun_env in
-    let lv_llvalue = _eval_lv lv fun_env false in
+    let lv_llvalue = eval_lv ~just_address:j_address lv fun_env false in
     (* Let's evaluate the expression to get an llvalue *)
     ignore (Llvm.build_store exp_llvalue lv_llvalue fun_env.ibuilder);
     exp_llvalue
@@ -231,23 +299,26 @@ and eval_exp node fun_env =
   | Ast.BLiteral(b) -> Llvm.const_int i1_type (if b then 1 else 0)
 
   | Ast.BinaryOp(bop, e1, e2) ->
-    let new_e1 = eval_exp e1 fun_env in
-    let new_e2 = eval_exp e2 fun_env in
     begin
-      match (bop) with 
-      | Ast.Add -> Llvm.build_add new_e1 new_e2 "temp.add" fun_env.ibuilder
-      | Ast.Sub -> Llvm.build_sub new_e1 new_e2 "temp.sub" fun_env.ibuilder
-      | Ast.Mult -> Llvm.build_mul new_e1 new_e2 "temp.mult" fun_env.ibuilder
-      | Ast.Div -> Llvm.build_udiv new_e1 new_e2 "temp.div" fun_env.ibuilder
-      | Ast.Mod -> Llvm.build_urem new_e1 new_e2 "temp.rem" fun_env.ibuilder
-      | Ast.Equal -> Llvm.build_icmp (Llvm.Icmp.Eq) new_e1 new_e2 "temp.eq" fun_env.ibuilder
-      | Ast.Neq -> Llvm.build_icmp (Llvm.Icmp.Ne) new_e1 new_e2 "temp.neq" fun_env.ibuilder
-      | Ast.Less -> Llvm.build_icmp (Llvm.Icmp.Slt) new_e1 new_e2 "temp.less" fun_env.ibuilder
-      | Ast.Leq -> Llvm.build_icmp (Llvm.Icmp.Sle) new_e1 new_e2 "temp.leq" fun_env.ibuilder
-      | Ast.Greater -> Llvm.build_icmp (Llvm.Icmp.Sgt) new_e1 new_e2 "temp.greater" fun_env.ibuilder
-      | Ast.Geq -> Llvm.build_icmp (Llvm.Icmp.Sge) new_e1 new_e2 "temp.geq" fun_env.ibuilder
-      | Ast.And -> Llvm.build_and new_e1 new_e2 "temp.and" fun_env.ibuilder
-      | Ast.Or -> Llvm.build_or new_e1 new_e2 "temp.or" fun_env.ibuilder
+      match bop with
+      | Ast.And -> eval_bool_and_exp e1 e2 fun_env
+      | Ast.Or ->  eval_bool_or_exp e1 e2 fun_env
+      | _ ->
+        let new_e1 = eval_exp e1 fun_env in
+        let new_e2 = eval_exp e2 fun_env in
+        match (bop) with 
+        | Ast.Add -> Llvm.build_add new_e1 new_e2 "temp.add" fun_env.ibuilder
+        | Ast.Sub -> Llvm.build_sub new_e1 new_e2 "temp.sub" fun_env.ibuilder
+        | Ast.Mult -> Llvm.build_mul new_e1 new_e2 "temp.mult" fun_env.ibuilder
+        | Ast.Div -> Llvm.build_udiv new_e1 new_e2 "temp.div" fun_env.ibuilder
+        | Ast.Mod -> Llvm.build_urem new_e1 new_e2 "temp.rem" fun_env.ibuilder
+        | Ast.Equal -> Llvm.build_icmp (Llvm.Icmp.Eq) new_e1 new_e2 "temp.eq" fun_env.ibuilder
+        | Ast.Neq -> Llvm.build_icmp (Llvm.Icmp.Ne) new_e1 new_e2 "temp.neq" fun_env.ibuilder
+        | Ast.Less -> Llvm.build_icmp (Llvm.Icmp.Slt) new_e1 new_e2 "temp.less" fun_env.ibuilder
+        | Ast.Leq -> Llvm.build_icmp (Llvm.Icmp.Sle) new_e1 new_e2 "temp.leq" fun_env.ibuilder
+        | Ast.Greater -> Llvm.build_icmp (Llvm.Icmp.Sgt) new_e1 new_e2 "temp.greater" fun_env.ibuilder
+        | Ast.Geq -> Llvm.build_icmp (Llvm.Icmp.Sge) new_e1 new_e2 "temp.geq" fun_env.ibuilder
+        | _ -> ignore_pattern ()
     end
 
   | Ast.UnaryOp(uop, exp) ->
@@ -258,7 +329,9 @@ and eval_exp node fun_env =
       | Ast.Not -> Llvm.build_not new_exp "temp.not" fun_env.ibuilder
     end
 
-  | Ast.Address(lv) -> _eval_lv lv fun_env false
+  | Ast.Address(lv) -> 
+    let ll_lv = eval_lv ~just_address:true lv fun_env false in
+    ll_lv
 
   | Ast.Call(Some cname, fname, exp_list) ->
     let new_exp_array = Array.of_list (List.map (fun e -> eval_exp e fun_env) exp_list) in
@@ -275,24 +348,24 @@ and eval_exp node fun_env =
 
   | Ast.DoubleOp(dop, dop_prec, lv) ->
     begin
-      let lv_llvalue = _eval_lv lv fun_env true in
+      let lv_llvalue = eval_lv lv fun_env true in
       let one_ll = Llvm.const_int i32_type 1 in
       match (dop, dop_prec) with
       | (Ast.PlusPlus, Ast.Post) ->
         let plus_one = Llvm.build_add lv_llvalue one_ll "" fun_env.ibuilder in 
-        let _ = Llvm.build_store plus_one (_eval_lv lv fun_env false) fun_env.ibuilder in
+        let _ = Llvm.build_store plus_one (eval_lv lv fun_env false) fun_env.ibuilder in
         lv_llvalue
       | (Ast.PlusPlus, Ast.Pre) -> 
         let plus_one = Llvm.build_add lv_llvalue one_ll "" fun_env.ibuilder in 
-        let _ = Llvm.build_store plus_one (_eval_lv lv fun_env false) fun_env.ibuilder in
+        let _ = Llvm.build_store plus_one (eval_lv lv fun_env false) fun_env.ibuilder in
         plus_one
       | (Ast.MinMin, Ast.Post) ->
         let plus_one = Llvm.build_sub lv_llvalue one_ll "" fun_env.ibuilder in 
-        let _ = Llvm.build_store plus_one (_eval_lv lv fun_env false) fun_env.ibuilder in
+        let _ = Llvm.build_store plus_one (eval_lv lv fun_env false) fun_env.ibuilder in
         lv_llvalue
       | (Ast.MinMin, Ast.Pre) -> 
         let plus_one = Llvm.build_sub lv_llvalue one_ll "" fun_env.ibuilder in 
-        let _ = Llvm.build_store plus_one (_eval_lv lv fun_env false) fun_env.ibuilder in
+        let _ = Llvm.build_store plus_one (eval_lv lv fun_env false) fun_env.ibuilder in
         plus_one
     end
 
@@ -305,10 +378,10 @@ and eval_stmt node fun_env =
   | Ast.Skip -> false
 
   | Ast.If(exp, s1, s2) ->
+      let guard_exp = eval_exp exp fun_env in
       let thenbb = Llvm.append_block global_context "if.then" fun_env.fun_def in
       let elsebb = Llvm.append_block global_context "if.else" fun_env.fun_def in
       let mergebb = Llvm.append_block global_context "if.merge" fun_env.fun_def in
-      let guard_exp = eval_exp exp fun_env in
       (* Build conditional branch *)
       ignore(Llvm.build_cond_br guard_exp thenbb elsebb fun_env.ibuilder);
       Llvm.position_at_end thenbb fun_env.ibuilder;
@@ -395,7 +468,9 @@ and eval_stmtordec node fun_env =
     fun_env.fsym_table <- Symbol_table.add_entry vid llvalue fun_env.fsym_table;
     false
   | Ast.Stmt(s) -> eval_stmt s fun_env
-and eval_member_decl node cname is_main_component current_module decl_st =
+
+and eval_member_decl node comp_env decl_st =
+  let (cname, is_main_component, current_module) = (comp_env.cname, comp_env.is_main, comp_env.current_module) in
   match node.Ast.node with 
   | Ast.FunDecl({Ast.fname; Ast.rtype; Ast.formals; Ast.body = Some body; _}) ->
     (* Remove the old function declaration... *)
@@ -438,6 +513,23 @@ and eval_member_decl node cname is_main_component current_module decl_st =
     let initialized_value = get_default_value vtyp in 
     let _ = Llvm.define_global var_name initialized_value current_module in ()
 
+  | Ast.VarDeclAndInit((vid, vtyp), exp) -> 
+    (* Remove the old variable declaration... *)
+    let var_name = name_mangling cname vid in 
+    let _ = Llvm.delete_global (Symbol_table.lookup var_name decl_st) in
+    (* We initialize the variable with value equal to zero if possible *)
+    let initialized_value = get_default_value vtyp in 
+    let global_var = Llvm.define_global var_name initialized_value current_module in
+    let builder = (snd comp_env.global_env.global_var_init) in
+    let fun_env = {
+      fsym_table = (Symbol_table.empty_table); 
+      fun_def = (fst comp_env.global_env.global_var_init); 
+      ibuilder = builder; 
+      current_module = current_module;
+    } in
+    let global_value = eval_exp exp fun_env in
+    ignore(Llvm.build_store global_value global_var builder);
+
   | _ -> ignore_pattern ()
 
 and declare_component_members node cname is_main_component current_module acc = 
@@ -449,17 +541,20 @@ and declare_component_members node cname is_main_component current_module acc =
     let fun_decl = Llvm.declare_function fun_name fun_type current_module in
     Symbol_table.add_entry fun_name fun_decl acc
 
-  | Ast.VarDecl(vid, vtyp) -> 
+  | Ast.VarDecl(vid, vtyp)
+  | Ast.VarDeclAndInit((vid, vtyp), _) -> 
     let var_lltype = mucomp_type_to_llvm vtyp in 
     let var_name = name_mangling cname vid in 
     let var_decl = Llvm.declare_global var_lltype var_name current_module in    
     Symbol_table.add_entry var_name var_decl acc
 
-and eval_component_decl node temp_st current_module =
-  match node.Ast.node with
+and eval_component_decl comp_node temp_st global_env =
+  let current_module = global_env.global_module in
+  match comp_node.Ast.node with
   | Ast.ComponentDecl({cname; provides; definitions; _}) ->
     let is_main_component = (List.mem "App" provides) in
-    let _ = List.iter (fun m -> eval_member_decl m cname is_main_component current_module temp_st) definitions in ()
+    let comp_env = {cname = cname; is_main = is_main_component; current_module = current_module; global_env = global_env} in
+    let _ = List.iter (fun m -> eval_member_decl m comp_env temp_st) definitions in ()
 
 and declare_component node current_module acc =
   match node.Ast.node with
@@ -468,18 +563,58 @@ and declare_component node current_module acc =
     (* First declare the component members ... *)
     List.fold_left (fun acc m -> declare_component_members m cname is_main_component current_module acc) acc definitions
 
+let emit_global_constructor current_module = 
+    (* See: https://llvm.org/docs/LangRef.html#the-llvm-global-ctors-global-variable *)
+
+    let lltype_void_function = Llvm.function_type void_type [||] in
+    let lltype_ptr_void_function = Llvm.pointer_type lltype_void_function in
+    let lltype_ptr_char = Llvm.pointer_type i8_type in
+
+    let fname =  "_MUCOMP__global_ctors" in
+    let ftyp = mucomp_type_to_llvm (Ast.TFun([], Ast.TVoid)) in
+    let fun_priority = Llvm.const_int i32_type 65535 in
+    let fun_decl = Llvm.define_function fname ftyp current_module in
+    ignore(Llvm.set_linkage Llvm.Linkage.Internal fun_decl);
+    let fbuilder = Llvm.builder_at_end global_context (Llvm.entry_block fun_decl) in
+    let ret_inst = (Llvm.build_ret_void fbuilder) in
+
+    let constructor_type = Llvm.struct_type global_context [|i32_type; lltype_ptr_void_function; lltype_ptr_char|] in 
+    let global_init_constructor = Llvm.const_struct global_context [|fun_priority; fun_decl; Llvm.const_null lltype_ptr_char|] in
+    let constructor_array = Llvm.const_array constructor_type [|global_init_constructor|] in 
+    let global_ctors = Llvm.define_global "llvm.global_ctors" constructor_array current_module in
+    ignore(Llvm.set_linkage Llvm.Linkage.Appending global_ctors);
+    ignore(Llvm.position_before ret_inst fbuilder);
+    (fun_decl, fbuilder)
+    
+
+let define_global_var_init (_, ctors_builder) current_module = 
+  (* Declar function to initialize global "complex" variables *)
+  let fname = "_MUCOMP__global_var_initializer" in 
+  let ftyp = mucomp_type_to_llvm (Ast.TFun([], Ast.TVoid)) in
+  let fun_decl = Llvm.define_function fname ftyp current_module in
+  let fbuilder = Llvm.builder_at_end global_context (Llvm.entry_block fun_decl) in
+  let ret_inst = (Llvm.build_ret_void fbuilder) in
+  ignore(Llvm.build_call fun_decl [||] "" ctors_builder);
+  (Llvm.position_before ret_inst fbuilder);
+  (fun_decl, fbuilder)
+
 let compile_code ast = 
   (* The module disposition is handled somewhere else... *)
   let global_module = Llvm.create_module global_context "global-module" in
+
+  let ctors = emit_global_constructor global_module in
+  let global_var_init = define_global_var_init ctors global_module in
+
   (* Declare prelude functions *)
   let _ = List.iter (fun (id, typ) -> let _ = Llvm.declare_function (name_mangling "Prelude" id) (mucomp_type_to_llvm typ) global_module in ()) Mcomp_stdlib.prelude_signature in
   (* Declare components *)
   let components = match ast with Ast.CompilationUnit(cu) -> cu.components in 
   let temp_st = List.fold_left (fun acc c -> declare_component c global_module acc) (Symbol_table.begin_block (Symbol_table.empty_table)) components in
+  (* Define a function to initialize global data... *)
+  let global_env = {global_module = global_module; global_ctors = ctors; global_var_init = global_var_init } in
   (* Define components *)
-  let _ = List.iter (fun c -> eval_component_decl c temp_st global_module) components in
-  (* Only for debug purposes. *)
-  Llvm.dump_module global_module;
+  let _ = List.iter (fun c -> eval_component_decl c temp_st global_env) components in
+  Llvm.dump_module global_module;  (* Only for debug purposes. *)
   global_module
 
 let to_llvm_module ast = 

@@ -55,6 +55,7 @@ let first_pass ast global_table =
             let msg = Printf.sprintf "Double identifier `%s` found inside `%s` interface members" vid iname in
             raise (Semantic_error(loc, msg))
         end
+      | Ast.VarDeclAndInit(_, _) -> ignore_pattern ()
   in
   let rec visit_interfaces global_table = function
   | [] -> global_table
@@ -140,6 +141,7 @@ let first_pass ast global_table =
               let msg = Printf.sprintf "Double function definition. The function `%s` was already defined in the current scope!" fname in
               raise (Semantic_error(loc, msg))
           end
+        | Ast.VarDeclAndInit((vid, vtyp), _)
         | Ast.VarDecl(vid, vtyp) ->
           begin
             match vtyp with
@@ -232,6 +234,7 @@ let first_pass ast global_table =
                 let msg = Printf.sprintf "The function `%s` defined inside the interface `%s` was not implemented inside the component `%s`!" fname iname cname in
                 raise (Semantic_error(loc, msg))
             end
+          | Ast.VarDeclAndInit(_, _) -> ignore_pattern ()
           | Ast.VarDecl(ivid, _) ->
             let ivsym = Symbol_table.lookup ivid isym_tbl in
             begin
@@ -383,8 +386,13 @@ let rec type_check_lvalue component_ast_node component_sym function_sym_tbl anno
     in
     begin
       try
-        (* Is the variable inside the current function scope? *)
-        check_inside_table None function_sym_tbl
+        (* If the function symbol table pointer is equal to the component symbol table, *)
+        (* then we are checking an expression inside the global scope. *)
+        if function_sym_tbl == csym_tbl then 
+          check_inside_table (Some cname) function_sym_tbl
+        else
+          (* Otherwise we normally check the function symbol table. *)
+          check_inside_table None function_sym_tbl
       with Symbol_table.MissingEntry(_) ->
         begin
           try
@@ -395,21 +403,22 @@ let rec type_check_lvalue component_ast_node component_sym function_sym_tbl anno
         end
     end
   | _ -> ignore_pattern ()
-and type_check_expr component_ast_node component_sym function_sym_tbl annotated_expr = 
+
+and type_check_expr component_ast_node component_sym current_symbol_table annotated_expr = 
   let node = annotated_expr.Ast.node in 
   let loc = annotated_expr.Ast.annot in 
   match node with
 
   | Ast.LV(lv) -> 
-    let new_node_lv = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
+    let new_node_lv = type_check_lvalue component_ast_node component_sym current_symbol_table lv in
     begin
       match (new_node_lv) with
       | {Ast.annot = typ; _} -> (Ast.LV(new_node_lv)) @> typ
     end
 
   | Ast.Assign(lv, e) ->
-    let new_node_lv = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
-    let new_node_exp = type_check_expr component_ast_node component_sym function_sym_tbl e in
+    let new_node_lv = type_check_lvalue component_ast_node component_sym current_symbol_table lv in
+    let new_node_exp = type_check_expr component_ast_node component_sym current_symbol_table e in
     let type_check_res = type_check_assign new_node_lv.Ast.annot new_node_exp.Ast.annot in 
     if Result.is_ok type_check_res then
       (Ast.Assign(new_node_lv, new_node_exp)) @> (new_node_lv.Ast.annot)
@@ -421,7 +430,7 @@ and type_check_expr component_ast_node component_sym function_sym_tbl annotated_
   | Ast.BLiteral(b) -> (Ast.BLiteral(b)) @> Ast.TBool
 
   | Ast.UnaryOp(uop, exp) ->
-    let new_node_exp = type_check_expr component_ast_node component_sym function_sym_tbl exp in 
+    let new_node_exp = type_check_expr component_ast_node component_sym current_symbol_table exp in 
     begin
       match (uop, new_node_exp.Ast.annot) with
       | (Ast.Neg, Ast.TInt) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TInt
@@ -436,7 +445,7 @@ and type_check_expr component_ast_node component_sym function_sym_tbl annotated_
     end
 
   | Ast.DoubleOp(dop, dop_prec, lv) ->
-    let new_lv_node = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
+    let new_lv_node = type_check_lvalue component_ast_node component_sym current_symbol_table lv in
     begin
       match (new_lv_node.Ast.annot) with 
       | Ast.TInt -> (Ast.DoubleOp(dop, dop_prec, new_lv_node)) @> (Ast.TInt)
@@ -444,12 +453,12 @@ and type_check_expr component_ast_node component_sym function_sym_tbl annotated_
     end
 
   | Ast.Address(lv) ->
-    let new_lv_node = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in
+    let new_lv_node = type_check_lvalue component_ast_node component_sym current_symbol_table lv in
     (Ast.Address(new_lv_node)) @> (Ast.TRef(new_lv_node.Ast.annot))
 
   | Ast.BinaryOp(binop, exp1, exp2) ->
-    let new_node_exp1 = type_check_expr component_ast_node component_sym function_sym_tbl exp1 in 
-    let new_node_exp2 = type_check_expr component_ast_node component_sym function_sym_tbl exp2 in 
+    let new_node_exp1 = type_check_expr component_ast_node component_sym current_symbol_table exp1 in 
+    let new_node_exp2 = type_check_expr component_ast_node component_sym current_symbol_table exp2 in 
     begin
       let typ1 = new_node_exp1.Ast.annot in 
       let typ2 = new_node_exp2.Ast.annot in 
@@ -480,7 +489,6 @@ and type_check_expr component_ast_node component_sym function_sym_tbl annotated_
       | (_, Ast.TRef(Ast.TBool), Ast.TRef(Ast.TBool)) 
       when Ast.is_bool_operator binop -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TBool
 
-
       (* Error cases ... *)
       | (Ast.Add, _, _) -> 
         let msg = Printf.sprintf "You cannot sum a `%s` with a `%s`!" (Ast.show_type typ1) (Ast.show_type typ2) in
@@ -509,7 +517,7 @@ and type_check_expr component_ast_node component_sym function_sym_tbl annotated_
           | _ -> false
         in
         (* Evaluate the actual paramaters to get info about the types *)
-        let new_exp_actual_list = List.map (fun x -> type_check_expr component_ast_node component_sym function_sym_tbl x) exp_actual_list in
+        let new_exp_actual_list = List.map (fun x -> type_check_expr component_ast_node component_sym current_symbol_table x) exp_actual_list in
         let actuals_type = List.map (fun x -> match x.Ast.annot with Ast.TArray(i, _) -> (Ast.TArray(i, None)) | _ -> x.Ast.annot) new_exp_actual_list in 
         match fsym_attr.typ with 
         | Ast.TFun(formals_type, rtype) ->  
@@ -551,12 +559,7 @@ and type_check_expr component_ast_node component_sym function_sym_tbl annotated_
             raise (Semantic_error(loc, msg))
     in
     begin
-      (* Let's be sure that we are not invoking a variable... *)
-      try
-        let _ = (match Symbol_table.lookup fname function_sym_tbl with SVar({vattr;}) -> vattr |  _ -> ignore_pattern ()) in 
-        raise (Semantic_error(loc, "Cannot invoke a variable!"))
-      with Symbol_table.MissingEntry(_) ->
-        (* If the name doesn't belong to a variable then we can check the function *)
+      let aux () =
         try
           (* Search for the function name inside component symbol table*)
           let ifun_attr = (match Symbol_table.lookup fname comp_sym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!"))  |  _ -> ignore_pattern ()) in 
@@ -565,6 +568,17 @@ and type_check_expr component_ast_node component_sym function_sym_tbl annotated_
           (* Well, the function is not defined inside our component, let's go to search it *)
           (* inside the provided interfaces... *)
           lookup_provided_interfaces ("Prelude"::comp_uses_identifiers)
+      in
+      (* Let's be sure that we are not invoking a variable... *)
+      if comp_sym_tbl == current_symbol_table then
+        aux ()
+      else
+        try
+          let _ = (match Symbol_table.lookup fname current_symbol_table with SVar(_) -> true |  _ -> ignore_pattern ()) in 
+          raise (Semantic_error(loc, "Cannot invoke a variable!"))
+        with Symbol_table.MissingEntry(_) ->
+          (* If the name doesn't belong to a variable then we can check the function *)
+          aux ()
     end
   | _ -> 
     (Printf.printf "%s\n\n" (Ast.show_expr_node (fun _ _ -> ()) node));
@@ -643,13 +657,13 @@ and type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_tb
         (* Let's ensure that expression type is the same as the variable declaration *)
         let res_type_check = type_check_assign typ new_exp.Ast.annot in
         if Result.is_ok res_type_check then
-          (Ast.LocalDeclAndInit(decl, new_exp)) @> Ast.TVoid 
+          (Ast.LocalDeclAndInit(decl, new_exp)) @> (typ)
         else
           raise (Semantic_error(loc, Result.get_error res_type_check))
 
       | Ast.LocalDecl(vdecl) -> 
         let _ = check_local_decl_type annotated_node in 
-        (Ast.LocalDecl(vdecl)) @> Ast.TVoid
+        (Ast.LocalDecl(vdecl)) @> (snd vdecl)
 
       | Ast.Stmt(stmt) ->
         let new_stmt = type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) stmt in 
@@ -685,10 +699,21 @@ let second_pass ast global_table =
 
   let visit_component_member ast_node local_sym member_node =
     let node = member_node.Ast.node in 
-    let _loc = member_node.Ast.annot in
+    let loc = member_node.Ast.annot in
     match node with
     | Ast.VarDecl(vd) -> (Ast.VarDecl(vd)) @> (snd vd)
-    | Ast.FunDecl({Ast.body = None; _}) -> ignore_pattern ()
+
+    | Ast.VarDeclAndInit((_, vtyp) as decl, exp) -> 
+      let csym_tbl = (match local_sym with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore_pattern ()) in
+      let new_exp = type_check_expr ast_node local_sym csym_tbl exp in
+      let res_type_check = type_check_assign vtyp new_exp.Ast.annot in
+      if Result.is_ok res_type_check then
+        (Ast.VarDeclAndInit(decl, new_exp)) @> (vtyp)
+      else
+        raise (Semantic_error(loc, Result.get_error res_type_check))
+
+    | Ast.FunDecl({Ast.body = None; _}) -> ignore_pattern () (* The component functions have a body. *)
+
     | Ast.FunDecl({Ast.rtype; Ast.fname; Ast.formals; body = Some(fbody)}) ->
       let _ = check_fun_return_type member_node in
       let csym_tbl = (match local_sym with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore_pattern ()) in
@@ -700,17 +725,16 @@ let second_pass ast global_table =
   in
   let visit_interface_member member_node =
     let node = member_node.Ast.node in 
-    let _loc = member_node.Ast.annot in
     match node with
     | Ast.VarDecl(vd) -> (Ast.VarDecl(vd)) @> (snd vd)
     | Ast.FunDecl({Ast.rtype; Ast.fname; Ast.formals; body = None}) -> 
       let formals_type = List.map (snd) formals in
       (Ast.FunDecl({Ast.rtype = rtype; fname = fname; formals = formals; body = None})) @> (Ast.TFun(formals_type, rtype))
-    | Ast.FunDecl(_) -> ignore_pattern ()
+    | Ast.VarDeclAndInit(_, _) -> ignore_pattern () (* Inline variable declaration is not allowed inside interfaces *)
+    | Ast.FunDecl(_) -> ignore_pattern () (* Interface function don't have a body! *)
   in
   let visit_component comp_node = 
     let node = comp_node.Ast.node in
-    let _loc = comp_node.Ast.annot in
     match node with
     | Ast.ComponentDecl({cname = cname; uses = uses; provides = provides; definitions = definitions; }) ->
       let csym = Symbol_table.lookup cname global_table in
@@ -720,7 +744,6 @@ let second_pass ast global_table =
   in
   let visit_interface iface_node = 
     let node = iface_node.Ast.node in
-    let _loc = iface_node.Ast.annot in
     match node with
     | Ast.InterfaceDecl({iname = iname; declarations = declarations; }) ->
       let new_declarations = List.map (fun x -> visit_interface_member x) declarations in 

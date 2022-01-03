@@ -1,16 +1,16 @@
 open Ast 
 
 let prelude_signature = [
-  "time", TFun([], TInt);
-  "set_rand_seed", TFun([TInt], TVoid);
-  "rand", TFun([], TInt);
-  "print", TFun([TInt],TVoid);
-  "putc", TFun([TChar], TVoid);
-  "putendl", TFun([], TVoid);
-  "print_err", TFun([TInt],TVoid);
-  "getint", TFun([], TInt);
-  "getchar", TFun([], TChar);
-  "abort", TFun([TInt], TVoid);
+  "time",           TFun([], TInt);
+  "rand",           TFun([], TInt);
+  "putendl",        TFun([], TVoid);
+  "getint",         TFun([], TInt);
+  "getchar",        TFun([], TChar);
+  "set_rand_seed",  TFun([TInt], TVoid);
+  "print",          TFun([TInt], TVoid);
+  "print_err",      TFun([TInt], TVoid);
+  "abort",          TFun([TInt], TVoid);
+  "putc",           TFun([TChar], TVoid);
 ]
 
 let app_signature = [

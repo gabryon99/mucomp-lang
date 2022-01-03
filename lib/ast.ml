@@ -95,7 +95,7 @@ and 'a member_decl_node =
   (* A member of an interface or of a component *)
   | FunDecl of 'a fun_decl
   | VarDecl of vdecl
-  (* | VarDeclAndInit of vdecl * 'a expr *)
+  | VarDeclAndInit of vdecl * 'a expr
 [@@deriving show, ord, eq]
 
 and 'a interface_decl = ('a interface_decl_node, 'a) annotated_node 

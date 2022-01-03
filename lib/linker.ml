@@ -8,7 +8,6 @@ and symbol_table = (symbol) Symbol_table.t
 let ignore_pattern () = failwith "Should not happen"
 let (@>) node annot = Ast.make_node node annot
 
-
 let check_connections ast =
   let rec visit_components components component_sym_table = match components with
   | [] -> component_sym_table 
@@ -68,6 +67,7 @@ let check_connections ast =
     | [] -> ()
     | use::tail ->
       try
+        (* Check if each interface used by a component has a connction! *)
         let _ = Symbol_table.lookup use links_table in 
         aux cname links_table tail
       with Symbol_table.MissingEntry(_) ->
@@ -152,7 +152,12 @@ and visit_component_definitions current_comp_name component_link_table acc = fun
   | [] -> List.rev acc
   | annotated_node::tail ->
     match (annotated_node.Ast.node) with 
-    | Ast.VarDecl(_) -> visit_component_definitions current_comp_name component_link_table (annotated_node::acc) tail
+    | Ast.VarDecl(_) ->
+      visit_component_definitions current_comp_name component_link_table (annotated_node::acc) tail
+    | Ast.VarDeclAndInit(attr, exp) -> 
+      let new_exp = qualify_call_expression current_comp_name component_link_table exp in
+      let new_var_decl = (Ast.VarDeclAndInit(attr, new_exp)) @> annotated_node.Ast.annot in
+      visit_component_definitions current_comp_name component_link_table (new_var_decl::acc) tail
     | Ast.FunDecl({Ast.body = Some s; _} as fd) ->
       let new_stmt = visit_statements current_comp_name component_link_table s in
       let new_fun_decl = Ast.FunDecl({fd with Ast.body = Some new_stmt}) @> (annotated_node.Ast.annot) in 
