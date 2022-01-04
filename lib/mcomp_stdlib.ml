@@ -44,7 +44,8 @@ let list_zip_with_index l1 =
 let debug_fd = open_out "debug.log"
 
 (* Auxiliar function to print logs inside debug file *)
-let print_debug = Printf.fprintf debug_fd 
+let print_debug msg = 
+  Printf.fprintf debug_fd "[info] :: %s\n" msg
 
 (* At the program exit prints a log and close the debug file descriptor *)
 let _ = at_exit (fun _ ->

@@ -64,10 +64,9 @@ let get_default_value typ =
   | Ast.TChar -> Llvm.const_int i8_type 0 (* default values for chars is terminator *)
   | Ast.TFloat -> Llvm.const_float float_type 0.0
   | Ast.TArray(styp, Some n) ->           (* initialize an array containing only zeros *)
-    let lltype = mucomp_type_to_llvm typ in
     let llscalar_type = mucomp_type_to_llvm styp in
     let initial_array_values = Array.init n (fun _ -> (Llvm.const_int llscalar_type 0)) in
-    Llvm.const_array lltype initial_array_values
+    Llvm.const_array llscalar_type initial_array_values
   | _ -> ignore_pattern ()
 
 (* Auxiliar function to build an alloca instruction depending on the value type. *)
@@ -154,22 +153,41 @@ let rec eval_lv ?(just_address=false) node fun_env load =
         if load then Llvm.build_load lv_llvalue "" fun_env.ibuilder else lv_llvalue
     end
 
-  | (Ast.AccVar(Some cname, vid), _) -> 
+  | (Ast.AccVar(Some cname, vid), typ) -> 
     let mangled_name = name_mangling cname vid in
     let global_var = Llvm.lookup_global mangled_name fun_env.current_module in
     begin
       match global_var with
       | None -> raise (Codegen_error("Global variable not found!"))
-      | Some var -> if load then Llvm.build_load var mangled_name fun_env.ibuilder else var
+      | Some lv_llvalue -> 
+        begin
+          match typ with
+          | Ast.TRef(_) ->
+            if just_address then 
+              lv_llvalue
+            else
+              let l1 = Llvm.build_load lv_llvalue "" fun_env.ibuilder in
+              if load then Llvm.build_load l1 "" fun_env.ibuilder else l1
+          | Ast.TArray(_, Some _) ->
+            Llvm.build_in_bounds_gep lv_llvalue [|(Llvm.const_int i32_type 0); (Llvm.const_int i32_type 0)|] "" fun_env.ibuilder
+          | _ ->
+            if load then Llvm.build_load lv_llvalue "" fun_env.ibuilder else lv_llvalue
+        end        
     end
 
   | (Ast.AccIndex(lv, exp), _) ->
-    let aux' lv idx = match lv.Ast.node with
-    | Ast.AccVar(Some _, _) -> failwith "Not implemented, yet."
-    | Ast.AccVar(None, vid) ->
-      let lv_llvalue = Symbol_table.lookup vid fun_env.fsym_table in
+    let aux' lv idx = 
+      let lv_llvalue = match lv.Ast.node with
+      | Ast.AccVar(Some cname, vid) -> 
+        begin 
+          match Llvm.lookup_global (name_mangling cname vid) fun_env.current_module with 
+          | None -> raise (Codegen_error("Global variable not found"))
+          | Some var -> var
+        end
+      | Ast.AccVar(None, vid) -> Symbol_table.lookup vid fun_env.fsym_table 
+      | _ -> ignore_pattern () 
+      in
       begin
-        Llvm.dump_value lv_llvalue;
         match (lv.Ast.annot) with
         | Ast.TArray(_, Some _) ->
           let array_element = Llvm.build_in_bounds_gep lv_llvalue [|(Llvm.const_int i32_type 0); idx|] "" fun_env.ibuilder in
@@ -185,9 +203,8 @@ let rec eval_lv ?(just_address=false) node fun_env load =
             Llvm.build_load array_element "" fun_env.ibuilder
           else
             array_element
-        | _ -> failwith "Nop"
+        | _ -> ignore_pattern ()
       end
-    | _ -> ignore_pattern () 
     in
     let llv_exp = eval_exp exp fun_env in aux' lv llv_exp
     
@@ -260,6 +277,14 @@ and eval_exp node fun_env =
   | Ast.FLiteral(f) -> Llvm.const_float float_type f
 
   | Ast.BinaryOp(bop, e1, e2) ->
+    
+    let common_check = function
+    | (Ast.TRef(t1), t2) when Ast.equal_typ t1 t2 -> true
+    | (t1, Ast.TRef(t2)) when Ast.equal_typ t1 t2 -> true
+    | (t1, t2) when Ast.equal_typ t1 t2 -> true
+    | _ -> false
+    in
+
     begin
       match bop with
       | Ast.And -> eval_bool_and_exp e1 e2 fun_env
@@ -268,38 +293,38 @@ and eval_exp node fun_env =
         let new_e1 = eval_exp e1 fun_env in
         let new_e2 = eval_exp e2 fun_env in
         match (bop, e1.Ast.annot, e2.Ast.annot) with 
-        | (Ast.Add, Ast.TInt, Ast.TInt)         -> Llvm.build_add new_e1 new_e2 "temp.add" fun_env.ibuilder
-        | (Ast.Add, Ast.TFloat, Ast.TFloat)     -> Llvm.build_fadd new_e1 new_e2 "temp.fadd" fun_env.ibuilder
+        | (Ast.Add, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))      -> Llvm.build_add new_e1 new_e2 "temp.add" fun_env.ibuilder
+        | (Ast.Add, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TFloat) && (common_check (t1, t2))    -> Llvm.build_fadd new_e1 new_e2 "temp.fadd" fun_env.ibuilder
         
-        | (Ast.Sub, Ast.TInt, Ast.TInt)         -> Llvm.build_sub new_e1 new_e2 "temp.sub" fun_env.ibuilder
-        | (Ast.Sub, Ast.TFloat, Ast.TFloat)     -> Llvm.build_fsub new_e1 new_e2 "temp.fsub" fun_env.ibuilder
+        | (Ast.Sub, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))      -> Llvm.build_sub new_e1 new_e2 "temp.sub" fun_env.ibuilder
+        | (Ast.Sub, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TFloat) && (common_check (t1, t2))    -> Llvm.build_fsub new_e1 new_e2 "temp.fsub" fun_env.ibuilder
         
-        | (Ast.Mult, Ast.TInt, Ast.TInt)        -> Llvm.build_mul new_e1 new_e2 "temp.mult" fun_env.ibuilder
-        | (Ast.Mult, Ast.TFloat, Ast.TFloat)    -> Llvm.build_fmul new_e1 new_e2 "temp.fmult" fun_env.ibuilder
+        | (Ast.Mult, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))     -> Llvm.build_mul new_e1 new_e2 "temp.mult" fun_env.ibuilder
+        | (Ast.Mult, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TFloat) && (common_check (t1, t2))   -> Llvm.build_fmul new_e1 new_e2 "temp.fmult" fun_env.ibuilder
 
-        | (Ast.Div, Ast.TInt, Ast.TInt)         -> Llvm.build_udiv new_e1 new_e2 "temp.div" fun_env.ibuilder
-        | (Ast.Div, Ast.TFloat, Ast.TFloat)     -> Llvm.build_fdiv new_e1 new_e2 "temp.fdiv" fun_env.ibuilder
+        | (Ast.Div, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))      -> Llvm.build_udiv new_e1 new_e2 "temp.div" fun_env.ibuilder
+        | (Ast.Div, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TFloat) && (common_check (t1, t2))    -> Llvm.build_fdiv new_e1 new_e2 "temp.fdiv" fun_env.ibuilder
 
-        | (Ast.Mod, Ast.TInt, Ast.TInt)         -> Llvm.build_srem new_e1 new_e2 "temp.rem" fun_env.ibuilder
-        | (Ast.Mod, Ast.TFloat, Ast.TFloat)     -> Llvm.build_frem new_e1 new_e2 "temp.frem" fun_env.ibuilder
+        | (Ast.Mod, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))      -> Llvm.build_srem new_e1 new_e2 "temp.rem" fun_env.ibuilder
+        | (Ast.Mod, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TFloat) && (common_check (t1, t2))    -> Llvm.build_frem new_e1 new_e2 "temp.frem" fun_env.ibuilder
 
-        | (Ast.Equal, Ast.TInt, Ast.TInt)       -> Llvm.build_icmp (Llvm.Icmp.Eq) new_e1 new_e2 "temp.eq" fun_env.ibuilder
-        | (Ast.Equal, Ast.TFloat, Ast.TFloat)   -> Llvm.build_fcmp (Llvm.Fcmp.Oeq) new_e1 new_e2 "temp.feq" fun_env.ibuilder
+        | (Ast.Equal, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))      -> Llvm.build_icmp (Llvm.Icmp.Eq) new_e1 new_e2 "temp.eq" fun_env.ibuilder
+        | (Ast.Equal, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TFloat) && (common_check (t1, t2))    -> Llvm.build_fcmp (Llvm.Fcmp.Oeq) new_e1 new_e2 "temp.feq" fun_env.ibuilder
         
-        | (Ast.Neq, Ast.TInt, Ast.TInt)         -> Llvm.build_icmp (Llvm.Icmp.Ne) new_e1 new_e2 "temp.neq" fun_env.ibuilder
-        | (Ast.Neq, Ast.TFloat, Ast.TFloat)     -> Llvm.build_fcmp (Llvm.Fcmp.One) new_e1 new_e2 "temp.fneq" fun_env.ibuilder
+        | (Ast.Neq, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))        -> Llvm.build_icmp (Llvm.Icmp.Ne) new_e1 new_e2 "temp.neq" fun_env.ibuilder
+        | (Ast.Neq, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TFloat) && (common_check (t1, t2))      -> Llvm.build_fcmp (Llvm.Fcmp.One) new_e1 new_e2 "temp.fneq" fun_env.ibuilder
 
-        | (Ast.Less, Ast.TInt, Ast.TInt)        -> Llvm.build_icmp (Llvm.Icmp.Slt) new_e1 new_e2 "temp.less" fun_env.ibuilder
-        | (Ast.Less, Ast.TFloat, Ast.TFloat)    -> Llvm.build_fcmp (Llvm.Fcmp.Oeq) new_e1 new_e2 "temp.fless" fun_env.ibuilder
+        | (Ast.Less, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))       -> Llvm.build_icmp (Llvm.Icmp.Slt) new_e1 new_e2 "temp.less" fun_env.ibuilder
+        | (Ast.Less, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TFloat) && (common_check (t1, t2))     -> Llvm.build_fcmp (Llvm.Fcmp.Oeq) new_e1 new_e2 "temp.fless" fun_env.ibuilder
         
-        | (Ast.Leq, Ast.TInt, Ast.TInt)         -> Llvm.build_icmp (Llvm.Icmp.Sle) new_e1 new_e2 "temp.leq" fun_env.ibuilder
-        | (Ast.Leq, Ast.TFloat, Ast.TFloat)     -> Llvm.build_fcmp (Llvm.Fcmp.Ole) new_e1 new_e2 "temp.fleq" fun_env.ibuilder
+        | (Ast.Leq, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))        -> Llvm.build_icmp (Llvm.Icmp.Sle) new_e1 new_e2 "temp.leq" fun_env.ibuilder
+        | (Ast.Leq, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))        -> Llvm.build_fcmp (Llvm.Fcmp.Ole) new_e1 new_e2 "temp.fleq" fun_env.ibuilder
         
-        | (Ast.Greater, Ast.TInt, Ast.TInt)     -> Llvm.build_icmp (Llvm.Icmp.Sgt) new_e1 new_e2 "temp.greater" fun_env.ibuilder
-        | (Ast.Greater, Ast.TFloat, Ast.TFloat) -> Llvm.build_fcmp (Llvm.Fcmp.Ogt) new_e1 new_e2 "temp.fgreater" fun_env.ibuilder
+        | (Ast.Greater, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))    -> Llvm.build_icmp (Llvm.Icmp.Sgt) new_e1 new_e2 "temp.greater" fun_env.ibuilder
+        | (Ast.Greater, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TFloat) && (common_check (t1, t2))  -> Llvm.build_fcmp (Llvm.Fcmp.Ogt) new_e1 new_e2 "temp.fgreater" fun_env.ibuilder
         
-        | (Ast.Geq, Ast.TInt, Ast.TInt)         -> Llvm.build_icmp (Llvm.Icmp.Sge) new_e1 new_e2 "temp.geq" fun_env.ibuilder
-        | (Ast.Geq, Ast.TFloat, Ast.TFloat)     -> Llvm.build_fcmp (Llvm.Fcmp.Oge) new_e1 new_e2 "temp.fgeq" fun_env.ibuilder
+        | (Ast.Geq, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))         -> Llvm.build_icmp (Llvm.Icmp.Sge) new_e1 new_e2 "temp.geq" fun_env.ibuilder
+        | (Ast.Geq, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TFloat) && (common_check (t1, t2))       -> Llvm.build_fcmp (Llvm.Fcmp.Oge) new_e1 new_e2 "temp.fgeq" fun_env.ibuilder
         
         | _ -> ignore_pattern ()
     end

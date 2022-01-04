@@ -146,6 +146,11 @@ type typed_compilation_unit = typ compilation_unit
 
 let make_node a b = { node = a; annot = b}
 
+let base_typ = function 
+  | TArray(t, _) -> t
+  | TRef(t) -> t 
+  | _ as t -> t
+
 let is_scalar_type = function
   | TInt | TChar | TBool | TFloat -> true 
   | _ -> false
