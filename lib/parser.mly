@@ -110,6 +110,9 @@
 %left     M_PLUS M_MINUS
 %left     M_TIMES M_DIV M_MOD
 
+%right M_MINUS_MINUS
+
+%nonassoc U_MINUS
 %nonassoc U_NOT
 
 /* Start symbol */
@@ -291,7 +294,7 @@ expr:
     (Ast.Assign(lv, final_exp)) @> $loc
   }
 
-  | M_MINUS e = expr {
+  | M_MINUS e = expr %prec U_MINUS {
     (Ast.UnaryOp(Ast.Neg, e)) @> $loc
   }
   | L_NOT e = expr %prec U_NOT {
@@ -308,8 +311,9 @@ expr:
   | l_value M_PLUS_PLUS {
     (Ast.DoubleOp(Ast.PlusPlus, Ast.Post, $1)) @> $loc
   }
-  | M_MINUS_MINUS l_value {
-    (Ast.DoubleOp(Ast.MinMin, Ast.Pre, $2)) @> $loc
+  | M_MINUS_MINUS e = expr {
+      let u_exp = Ast.UnaryOp(Ast.Neg, e) @> $loc in
+      (Ast.UnaryOp(Ast.Neg, u_exp)) @> $loc
   }
   | l_value M_MINUS_MINUS {
     (Ast.DoubleOp(Ast.MinMin, Ast.Post, $1)) @> $loc
