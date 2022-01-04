@@ -114,6 +114,23 @@ let unify_blocks f_rtype fun_env =
         ) block_containing_returns;
     end
 
+let remove_useless_returns fun_env = 
+  (* After the firsr return in each block remove successors instructions *)
+  ignore(Llvm.iter_blocks (fun bb -> 
+    let counted_return = ref 0 in 
+    let to_delete = Llvm.fold_left_instrs (fun acc ins -> 
+      if !counted_return > 0 then
+        ins::acc
+      else
+        match (Llvm.is_terminator ins, Llvm.instr_opcode ins) with
+        | (true, Llvm.Opcode.Ret) ->
+          counted_return := !counted_return + 1;
+          acc
+        | (_, _) -> acc
+    ) [] bb in 
+    List.iter Llvm.delete_instruction to_delete
+  ) fun_env.fun_def)
+
 let fill_missing_returns rtype fun_env = 
   match rtype with 
   | Ast.TVoid ->
@@ -510,6 +527,7 @@ and eval_member_decl node comp_env decl_st =
     let _ = eval_stmt body fun_env in 
     let _ = unify_blocks rtype fun_env in
     let _ = fill_missing_returns rtype fun_env in
+    let _ = remove_useless_returns fun_env in
     let _ = remove_empty_blocks fun_env in
     ()
 
