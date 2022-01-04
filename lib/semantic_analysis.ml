@@ -13,6 +13,12 @@ let (@>) node annot = Ast.make_node node annot
 (** Function used inside pattern matching for cases that are not eligible *)
 let ignore_pattern () = failwith "Should not happen"
 
+type 'a fun_env = {
+  component_ast_node: 'a Ast.component_decl_node;
+  component_sym: attr sym;
+  current_symbol_table: attr sym_table;
+}
+
 (** The function performs semantic-rule checks as described by the specification. *)
 let first_pass ast global_table = 
   let load_prelude_interface prelude_name prelude_list global_table =
@@ -357,17 +363,22 @@ let type_check_assign typ1 typ2 =
   | (_, Ast.TVoid) -> Result.error "Cannot assign the void type to a variable!"
   | (t1, t2) -> Result.error (Printf.sprintf "Assignment not allowed. You cannot assign a %s to a %s variable!" (Ast.show_type t2) (Ast.show_type t1))
 
-let rec type_check_lvalue component_ast_node component_sym function_sym_tbl annotated_lv = 
+let rec type_check_lvalue fun_env annotated_lv = 
+
+  let component_sym = fun_env.component_sym in 
+  let function_sym_tbl = fun_env.current_symbol_table in
+
   let node = annotated_lv.Ast.node in 
   let loc = annotated_lv.Ast.annot in 
+
   match node with
   | Ast.AccIndex(lv, exp) ->
-    let lv_new_node = type_check_lvalue component_ast_node component_sym function_sym_tbl lv in 
+    let lv_new_node = type_check_lvalue fun_env lv in 
     begin
       match (lv_new_node) with
       | {Ast.node = Ast.AccIndex(_, _); _} -> ignore_pattern ()
       | {Ast.node = Ast.AccVar(_, _); annot = lv_typ} -> 
-        let exp_new_node = type_check_expr component_ast_node component_sym function_sym_tbl exp in 
+        let exp_new_node = type_check_expr fun_env exp in 
         (* Let's ensure exp_new_node has a TInt type *)
         begin
           match (exp_new_node) with 
@@ -404,21 +415,27 @@ let rec type_check_lvalue component_ast_node component_sym function_sym_tbl anno
     end
   | _ -> ignore_pattern ()
 
-and type_check_expr component_ast_node component_sym current_symbol_table annotated_expr = 
+and type_check_expr fun_env annotated_expr = 
+
+  let component_ast_node = fun_env.component_ast_node in 
+  let component_sym = fun_env.component_sym in
+  let current_symbol_table = fun_env.current_symbol_table in
+
   let node = annotated_expr.Ast.node in 
   let loc = annotated_expr.Ast.annot in 
+
   match node with
 
   | Ast.LV(lv) -> 
-    let new_node_lv = type_check_lvalue component_ast_node component_sym current_symbol_table lv in
+    let new_node_lv = type_check_lvalue fun_env lv in
     begin
       match (new_node_lv) with
       | {Ast.annot = typ; _} -> (Ast.LV(new_node_lv)) @> typ
     end
 
   | Ast.Assign(lv, e) ->
-    let new_node_lv = type_check_lvalue component_ast_node component_sym current_symbol_table lv in
-    let new_node_exp = type_check_expr component_ast_node component_sym current_symbol_table e in
+    let new_node_lv = type_check_lvalue fun_env lv in
+    let new_node_exp = type_check_expr fun_env e in
     let type_check_res = type_check_assign new_node_lv.Ast.annot new_node_exp.Ast.annot in 
     if Result.is_ok type_check_res then
       (Ast.Assign(new_node_lv, new_node_exp)) @> (new_node_lv.Ast.annot)
@@ -431,7 +448,7 @@ and type_check_expr component_ast_node component_sym current_symbol_table annota
   | Ast.FLiteral(f) -> (Ast.FLiteral(f)) @> Ast.TFloat
 
   | Ast.UnaryOp(uop, exp) ->
-    let new_node_exp = type_check_expr component_ast_node component_sym current_symbol_table exp in 
+    let new_node_exp = type_check_expr fun_env exp in 
     begin
       match (uop, new_node_exp.Ast.annot) with
       | (Ast.Neg, Ast.TInt) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TInt
@@ -449,7 +466,7 @@ and type_check_expr component_ast_node component_sym current_symbol_table annota
     end
 
   | Ast.DoubleOp(dop, dop_prec, lv) ->
-    let new_lv_node = type_check_lvalue component_ast_node component_sym current_symbol_table lv in
+    let new_lv_node = type_check_lvalue fun_env lv in
     begin
       match (new_lv_node.Ast.annot) with 
       | Ast.TInt -> (Ast.DoubleOp(dop, dop_prec, new_lv_node)) @> (Ast.TInt)
@@ -457,12 +474,12 @@ and type_check_expr component_ast_node component_sym current_symbol_table annota
     end
 
   | Ast.Address(lv) ->
-    let new_lv_node = type_check_lvalue component_ast_node component_sym current_symbol_table lv in
+    let new_lv_node = type_check_lvalue fun_env lv in
     (Ast.Address(new_lv_node)) @> (Ast.TRef(new_lv_node.Ast.annot))
 
   | Ast.BinaryOp(binop, exp1, exp2) ->
-    let new_node_exp1 = type_check_expr component_ast_node component_sym current_symbol_table exp1 in 
-    let new_node_exp2 = type_check_expr component_ast_node component_sym current_symbol_table exp2 in 
+    let new_node_exp1 = type_check_expr fun_env exp1 in 
+    let new_node_exp2 = type_check_expr fun_env exp2 in 
     begin
       let typ1 = new_node_exp1.Ast.annot in 
       let typ2 = new_node_exp2.Ast.annot in 
@@ -480,13 +497,13 @@ and type_check_expr component_ast_node component_sym current_symbol_table annota
       when Ast.is_math_operator binop -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> (typ1)
       
       (* >, <, >=, <= *)
-      | (_,   Ast.TInt, Ast.TInt)                     (* int + int *)
+      | (_,   Ast.TInt, Ast.TInt)                         (* int + int *)
       | (_,   Ast.TFloat, Ast.TFloat)                     (* float + float *)
-      | (_,   Ast.TRef(Ast.TInt), Ast.TInt)           (* &int + int *)
+      | (_,   Ast.TRef(Ast.TInt), Ast.TInt)               (* &int + int *)
       | (_,   Ast.TRef(Ast.TFloat), Ast.TFloat)           (* &float + float *)
-      | (_,   Ast.TInt, Ast.TRef(Ast.TInt))           (* int + &int *)
+      | (_,   Ast.TInt, Ast.TRef(Ast.TInt))               (* int + &int *)
       | (_,   Ast.TFloat, Ast.TRef(Ast.TFloat))           (* float + &float *)
-      | (_,   Ast.TRef(Ast.TInt), Ast.TRef(Ast.TInt)) (* &int + &int *)
+      | (_,   Ast.TRef(Ast.TInt), Ast.TRef(Ast.TInt))     (* &int + &int *)
       | (_,   Ast.TRef(Ast.TFloat), Ast.TRef(Ast.TFloat)) (* &float + &float *)
       when Ast.is_compare_operator binop -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TBool
       
@@ -529,7 +546,7 @@ and type_check_expr component_ast_node component_sym current_symbol_table annota
           | _ -> false
         in
         (* Evaluate the actual paramaters to get info about the types *)
-        let new_exp_actual_list = List.map (fun x -> type_check_expr component_ast_node component_sym current_symbol_table x) exp_actual_list in
+        let new_exp_actual_list = List.map (fun e -> type_check_expr fun_env e) exp_actual_list in
         let actuals_type = List.map (fun x -> match x.Ast.annot with Ast.TArray(i, _) -> (Ast.TArray(i, None)) | _ -> x.Ast.annot) new_exp_actual_list in 
         match fsym_attr.typ with 
         | Ast.TFun(formals_type, rtype) ->  
@@ -595,53 +612,65 @@ and type_check_expr component_ast_node component_sym current_symbol_table annota
   | _ -> 
     (Printf.printf "%s\n\n" (Ast.show_expr_node (fun _ _ -> ()) node));
     ignore_pattern ()
-and type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_tbl) annotated_stmt = 
+    
+and type_check_stmt fun_env fun_rtype annotated_stmt = 
+
+  let function_sym_tbl = fun_env.current_symbol_table in
+
   let node = annotated_stmt.Ast.node in 
   let loc = annotated_stmt.Ast.annot in
+
   match node with
   | Ast.If(b_expr, then_stmt, else_stmt) ->
-    let new_bexp = type_check_expr component_ast_node component_sym function_sym_tbl b_expr in
+    let new_bexp = type_check_expr fun_env b_expr in
     let sym_table = Symbol_table.begin_block function_sym_tbl in
-    let new_then_stmt = type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) then_stmt in 
+    let fun_env = {fun_env with current_symbol_table = sym_table} in
+    let new_then_stmt = type_check_stmt fun_env fun_rtype then_stmt in
     let sym_table = Symbol_table.end_block sym_table in 
     let sym_table = Symbol_table.begin_block sym_table in
-    let new_else_stmt = type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) else_stmt in
+    let fun_env = {fun_env with current_symbol_table = sym_table} in
+    let new_else_stmt = type_check_stmt fun_env fun_rtype else_stmt in
     begin
       let etyp = new_bexp.Ast.annot in 
       match etyp with 
       | Ast.TBool -> (Ast.If(new_bexp, new_then_stmt, new_else_stmt)) @> Ast.TVoid 
       | _ -> raise (Semantic_error(loc, "The if guard does not evaluate to a boolean type!"))
     end
+
   | Ast.While(b_expr, wstmt) ->
-      let new_bexp = type_check_expr component_ast_node component_sym function_sym_tbl b_expr in 
+      let new_bexp = type_check_expr fun_env b_expr in 
       let sym_table = Symbol_table.begin_block function_sym_tbl in
-      let new_wstmt = type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) wstmt in 
+      let fun_env = {fun_env with current_symbol_table = sym_table} in
+      let new_wstmt = type_check_stmt fun_env fun_rtype wstmt in 
       begin
         let etyp = new_bexp.Ast.annot in 
         match etyp with
         | Ast.TBool -> (Ast.While(new_bexp, new_wstmt)) @> Ast.TVoid
         | _ -> raise (Semantic_error(loc, "The while guard does not evaluate to a boolean type!"))
       end
+
   | Ast.Expr(e1) ->
-    let new_exp = type_check_expr component_ast_node component_sym function_sym_tbl e1 in
+    let new_exp = type_check_expr fun_env e1 in
     let etyp = new_exp.Ast.annot in 
     (Ast.Expr(new_exp)) @> etyp
+
   | Ast.For(e1, e2, e3, for_stmt) ->
     let sym_table = Symbol_table.begin_block function_sym_tbl in
-    let new_for_stmt = type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) for_stmt in
+    let fun_env = {fun_env with current_symbol_table = sym_table} in
+    let new_for_stmt = type_check_stmt fun_env fun_rtype for_stmt in
     begin
       match (e1, e2, e3) with
       | (Some(e1), Some(e2), Some(e3)) ->
-        let new_e1 = type_check_expr component_ast_node component_sym function_sym_tbl e1 in
-        let new_e2 = type_check_expr component_ast_node component_sym function_sym_tbl e2 in
-        let new_e3 = type_check_expr component_ast_node component_sym function_sym_tbl e3 in
+        let new_e1 = type_check_expr fun_env e1 in
+        let new_e2 = type_check_expr fun_env e2 in
+        let new_e3 = type_check_expr fun_env e3 in
         begin
           match (new_e2.Ast.annot) with
           | Ast.TBool -> (Ast.For(Some new_e1, Some new_e2, Some new_e3, new_for_stmt)) @> (Ast.TVoid)
           | _ -> raise (Semantic_error(loc, "The for guard is not a boolean expression!"))
         end
       | (None, Some(e2), None) ->
-        let new_e2 = type_check_expr component_ast_node component_sym function_sym_tbl e2 in
+        let new_e2 = type_check_expr fun_env e2 in
         begin
           match (new_e2.Ast.annot) with
           | Ast.TBool -> (Ast.For(None, Some new_e2, None, new_for_stmt)) @> (Ast.TVoid)
@@ -650,9 +679,11 @@ and type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_tb
       | (None, None, None) -> (Ast.For(None, None, None, new_for_stmt)) @> (Ast.TVoid)
       | _ -> ignore_pattern ()
     end
+  
   | Ast.Return(None) -> (Ast.Return(None)) @> Ast.TVoid
+
   | Ast.Return(Some(exp)) ->
-      let new_exp = type_check_expr component_ast_node component_sym function_sym_tbl exp in 
+      let new_exp = type_check_expr fun_env exp in 
       (* Let's check if the expression type matches with the function return type *)
       if Ast.equal_typ (new_exp.Ast.annot) (fun_rtype) then
         (Ast.Return(Some(new_exp))) @> (new_exp.Ast.annot)
@@ -665,7 +696,7 @@ and type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_tb
       match (annotated_node.Ast.node) with
       | Ast.LocalDeclAndInit((_, typ) as decl, exp) ->
         let _ = check_local_decl_type annotated_node in
-        let new_exp = type_check_expr component_ast_node component_sym sym_table exp in
+        let new_exp = type_check_expr fun_env exp in
         (* Let's ensure that expression type is the same as the variable declaration *)
         let res_type_check = type_check_assign typ new_exp.Ast.annot in
         if Result.is_ok res_type_check then
@@ -678,7 +709,8 @@ and type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_tb
         (Ast.LocalDecl(vdecl)) @> (snd vdecl)
 
       | Ast.Stmt(stmt) ->
-        let new_stmt = type_check_stmt component_ast_node component_sym (fun_rtype, sym_table) stmt in 
+        let fun_env = {fun_env with current_symbol_table = sym_table} in
+        let new_stmt = type_check_stmt fun_env fun_rtype stmt in 
         (Ast.Stmt(new_stmt)) @> Ast.TVoid
     in
     let aux_fill_local_st sym_tbl annotated_node =
@@ -696,6 +728,7 @@ and type_check_stmt component_ast_node component_sym (fun_rtype, function_sym_tb
         end
       | _ -> sym_tbl 
     in
+
     let (_, new_stmts) = List.fold_left (fun (st, statements) stmt -> 
       let st = aux_fill_local_st st stmt in
       let stmt = type_check_stmtordec stmt (fun_rtype, st) in
@@ -717,7 +750,12 @@ let second_pass ast global_table =
 
     | Ast.VarDeclAndInit((_, vtyp) as decl, exp) -> 
       let csym_tbl = (match local_sym with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore_pattern ()) in
-      let new_exp = type_check_expr ast_node local_sym csym_tbl exp in
+      let fun_env = {
+        component_ast_node = ast_node;
+        component_sym = local_sym;
+        current_symbol_table = csym_tbl;
+      } in
+      let new_exp = type_check_expr fun_env exp in
       let res_type_check = type_check_assign vtyp new_exp.Ast.annot in
       if Result.is_ok res_type_check then
         (Ast.VarDeclAndInit(decl, new_exp)) @> (vtyp)
@@ -731,7 +769,12 @@ let second_pass ast global_table =
       let csym_tbl = (match local_sym with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore_pattern ()) in
       let fn_sym = Symbol_table.lookup fname csym_tbl in
       let fn_st = (match fn_sym with SFunction({fsym_tbl; _}) -> fsym_tbl | _ -> ignore_pattern ()) in
-      let new_body = type_check_stmt ast_node local_sym (rtype, fn_st) fbody in
+      let fun_env = {
+        component_ast_node = ast_node;
+        component_sym = local_sym;
+        current_symbol_table = fn_st;
+      } in
+      let new_body = type_check_stmt fun_env rtype fbody in
       let formals_type = List.map (snd) formals in
       (Ast.FunDecl({Ast.rtype = rtype; fname = fname; formals = formals; body = Some(new_body)})) @> (Ast.TFun(formals_type, rtype))
   in
