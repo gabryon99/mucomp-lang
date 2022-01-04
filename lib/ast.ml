@@ -21,6 +21,7 @@ type identifier = string [@@deriving show, ord, eq]
 
 type typ =
   | TInt (* Type int *)
+  | TFloat (* Type float *)
   | TBool (* Type bool *)
   | TChar (* Type char *)
   | TArray of typ * int option (* Array type *)
@@ -42,6 +43,7 @@ and 'a expr_node =
   | LV of 'a lvalue (* `x or a[e] *)
   | Assign of 'a lvalue * 'a expr (* x=e or a[e]=e *)
   | ILiteral of int (* Integer literal *)
+  | FLiteral of float (* Float literal *)
   | CLiteral of char (* Char literal *)
   | BLiteral of bool (* Bool literal *)
   | UnaryOp of uop * 'a expr (* Unary primitive operator *)
@@ -145,7 +147,7 @@ type typed_compilation_unit = typ compilation_unit
 let make_node a b = { node = a; annot = b}
 
 let is_scalar_type = function
-  | TInt | TChar | TBool -> true 
+  | TInt | TChar | TBool | TFloat -> true 
   | _ -> false
 
 let is_ref_to_scalar_type = function 
@@ -169,6 +171,7 @@ let rec show_type = function
   | TChar -> "char"
   | TBool -> "bool"
   | TVoid -> "void"
+  | TFloat -> "float"
   | TRef(t) -> "&" ^ (show_type t) 
   | TArray(t, _) -> (show_type t) ^ "[]"
   | TComponent(id) -> ("C" ^ id)

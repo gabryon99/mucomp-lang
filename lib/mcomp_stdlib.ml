@@ -6,10 +6,17 @@ let prelude_signature = [
   "putendl",        TFun([], TVoid);
   "getint",         TFun([], TInt);
   "getchar",        TFun([], TChar);
+  "getfloat",        TFun([], TFloat);
+
   "set_rand_seed",  TFun([TInt], TVoid);
   "print",          TFun([TInt], TVoid);
   "print_err",      TFun([TInt], TVoid);
   "abort",          TFun([TInt], TVoid);
+  "ifloat",         TFun([TFloat], TInt);
+
+  "print_f",        TFun([TFloat], TVoid);
+  "fint",           TFun([TInt], TFloat);
+
   "putc",           TFun([TChar], TVoid);
 ]
 

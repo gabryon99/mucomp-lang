@@ -21,6 +21,7 @@
 
 %token <string> ID
 %token <int> INT
+%token <float> FLOAT
 %token <char> CHAR 
 %token <bool> BOOL
 
@@ -35,6 +36,7 @@
 %token K_COMPONENT
 
 %token K_INT
+%token K_FLOAT
 %token K_CHAR
 %token K_BOOL
 %token K_VOID
@@ -221,6 +223,7 @@ basic_type:
   | K_CHAR  { Ast.TChar }
   | K_VOID  { Ast.TVoid }
   | K_BOOL  { Ast.TBool }
+  | K_FLOAT { Ast.TFloat }
 ;
 
 stmt:
@@ -251,6 +254,7 @@ stmt:
 
 expr:
   | n = INT   { (Ast.ILiteral(n)) @> $loc }
+  | n = FLOAT   { (Ast.FLiteral(n)) @> $loc }
   | b = BOOL  { (Ast.BLiteral(b)) @> $loc}
   | c = CHAR  { (Ast.CLiteral(c)) @> $loc }
   | e = delimited(L_PAREN, expr, R_PAREN) { e }

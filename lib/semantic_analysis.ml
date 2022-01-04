@@ -339,7 +339,7 @@ let check_fun_return_type annotated_node =
   let loc = annotated_node.Ast.annot in
   let rtype = match node with Ast.FunDecl({Ast.rtype = rtype; _}) -> rtype | _ -> ignore_pattern () in
   match rtype with 
-  | Ast.TInt | Ast.TBool | Ast.TChar | Ast.TVoid -> ()
+  | Ast.TInt | Ast.TBool | Ast.TChar | Ast.TVoid | Ast.TFloat -> ()
   | _  -> raise (Semantic_error(loc, "A function can only returns int, bool, char or void."))
 
 let type_check_assign typ1 typ2 =
@@ -428,19 +428,23 @@ and type_check_expr component_ast_node component_sym current_symbol_table annota
   | Ast.ILiteral(i) -> (Ast.ILiteral(i)) @> Ast.TInt
   | Ast.CLiteral(c) -> (Ast.CLiteral(c)) @> Ast.TChar
   | Ast.BLiteral(b) -> (Ast.BLiteral(b)) @> Ast.TBool
+  | Ast.FLiteral(f) -> (Ast.FLiteral(f)) @> Ast.TFloat
 
   | Ast.UnaryOp(uop, exp) ->
     let new_node_exp = type_check_expr component_ast_node component_sym current_symbol_table exp in 
     begin
       match (uop, new_node_exp.Ast.annot) with
       | (Ast.Neg, Ast.TInt) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TInt
+      | (Ast.Neg, Ast.TFloat) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TFloat
       | (Ast.Neg, Ast.TRef(Ast.TInt)) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TInt
+      | (Ast.Neg, Ast.TRef(Ast.TFloat)) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TFloat
       | (Ast.Neg, Ast.TChar) -> raise (Semantic_error(loc, "Minus operator cannot be applied to a character!"))
       | (Ast.Neg, Ast.TBool) -> raise (Semantic_error(loc, "Minus operator cannot be applied to a boolean!"))
       | (Ast.Not, Ast.TBool) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TBool
       | (Ast.Not, Ast.TRef(Ast.TBool)) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TBool
       | (Ast.Not, Ast.TChar) -> raise (Semantic_error(loc, "Not operator cannot be applied to a character!"))
       | (Ast.Not, Ast.TInt) -> raise (Semantic_error(loc, "Not operator cannot be applied to an integer!"))
+      | (Ast.Not, Ast.TFloat) -> raise (Semantic_error(loc, "Not operator cannot be applied to a float number!"))
       | _ -> raise (Semantic_error(loc, "Invalid unary operator expression!"))
     end
 
@@ -465,17 +469,25 @@ and type_check_expr component_ast_node component_sym current_symbol_table annota
       match (binop, typ1, typ2) with
 
       (* +, -, *, /, % operators *)
-      | (_,   Ast.TInt, Ast.TInt)                     (* int + int *)
-      | (_,   Ast.TRef(Ast.TInt), Ast.TInt)           (* &int + int *)
-      | (_,   Ast.TInt, Ast.TRef(Ast.TInt))           (* int + &int *)
-      | (_,   Ast.TRef(Ast.TInt), Ast.TRef(Ast.TInt)) (* &int + &int *)
-      when Ast.is_math_operator binop -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TInt
+      | (_,   Ast.TInt, Ast.TInt)                         (* int + int *)
+      | (_,   Ast.TFloat, Ast.TFloat)                     (* float + float *)
+      | (_,   Ast.TRef(Ast.TInt), Ast.TInt)               (* &int + int *)
+      | (_,   Ast.TRef(Ast.TFloat), Ast.TFloat)           (* &float + float *)
+      | (_,   Ast.TInt, Ast.TRef(Ast.TInt))               (* int + &int *)
+      | (_,   Ast.TFloat, Ast.TRef(Ast.TFloat))           (* float + &float *)
+      | (_,   Ast.TRef(Ast.TInt), Ast.TRef(Ast.TInt))     (* &int + &int *)
+      | (_,   Ast.TRef(Ast.TFloat), Ast.TRef(Ast.TFloat)) (* &float + &float *)
+      when Ast.is_math_operator binop -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> (typ1)
       
       (* >, <, >=, <= *)
       | (_,   Ast.TInt, Ast.TInt)                     (* int + int *)
+      | (_,   Ast.TFloat, Ast.TFloat)                     (* float + float *)
       | (_,   Ast.TRef(Ast.TInt), Ast.TInt)           (* &int + int *)
+      | (_,   Ast.TRef(Ast.TFloat), Ast.TFloat)           (* &float + float *)
       | (_,   Ast.TInt, Ast.TRef(Ast.TInt))           (* int + &int *)
+      | (_,   Ast.TFloat, Ast.TRef(Ast.TFloat))           (* float + &float *)
       | (_,   Ast.TRef(Ast.TInt), Ast.TRef(Ast.TInt)) (* &int + &int *)
+      | (_,   Ast.TRef(Ast.TFloat), Ast.TRef(Ast.TFloat)) (* &float + &float *)
       when Ast.is_compare_operator binop -> (Ast.BinaryOp(binop, new_node_exp1, new_node_exp2)) @> Ast.TBool
       
       (* ==, != *)

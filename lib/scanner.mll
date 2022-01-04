@@ -8,13 +8,14 @@
     List.iter (fun (key, data) -> Hashtbl.add tbl key data) init;
     tbl
 
-  let keywords_table = create_hashtable 18 [
+  let keywords_table = create_hashtable 19 [
     ("true",      BOOL(true));
     ("false",     BOOL(false));
     ("var",       K_VAR);
     ("def",       K_DEF);
     ("uses",      K_USES);
     ("int",       K_INT);
+    ("float",     K_FLOAT);
     ("char",      K_CHAR);
     ("bool",      K_BOOL);
     ("void",      K_VOID);
@@ -42,6 +43,13 @@
       let msg = Printf.sprintf "The identifier \"%s\" must be < %d characters!\n" id max_id_length in
       raise (Lexing_error (Location.to_lexeme_position lexbuf, msg))
   
+  let check_num_float32 num lexbuf =
+     if (abs_float num) > Float.max_float then
+      let msg = Printf.sprintf "The number \"%f\" is not a 32 bit floating point number!\n" num in 
+      raise (Lexing_error (Location.to_lexeme_position lexbuf, msg))
+    else
+      FLOAT(num)
+
   let check_num_int32 num lexbuf =
     if (abs num) > 0x7FFFFFFF then
       let msg = Printf.sprintf "The number \"%d\" is not a 32 bit integer!\n" num in 
@@ -56,6 +64,8 @@
 let digit = ['0' - '9']
 let dec_number = digit+
 let hex_number = "0x"['0' - '9' 'a' - 'f' 'A' - 'F']+
+
+let float_number = digit+'.'digit+
 
 let identifier = ['a' - 'z' 'A' - 'Z']['0' - '9' 'a' - 'z' 'A' - 'Z' '_']*
 
@@ -79,6 +89,10 @@ rule next_token = parse
   | dec_number as num   { 
                           let n = int_of_string num in 
                           check_num_int32 n lexbuf
+                        }
+  | float_number as fnum {
+                          let n = float_of_string fnum in 
+                          check_num_float32 n lexbuf
                         }
 
   | identifier as id    { 

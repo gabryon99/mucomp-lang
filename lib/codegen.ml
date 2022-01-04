@@ -36,6 +36,7 @@ let void_type = Llvm.void_type global_context
 and i1_type = Llvm.i1_type global_context
 and i8_type = Llvm.i8_type global_context
 and i32_type = Llvm.i32_type global_context
+and float_type = Llvm.float_type global_context
 
 (* Convert a mucomp_lang type into a LLVM one. *)
 let rec mucomp_type_to_llvm typ =
@@ -43,6 +44,7 @@ let rec mucomp_type_to_llvm typ =
   | Ast.TBool -> i1_type
   | Ast.TInt -> i32_type
   | Ast.TChar -> i8_type
+  | Ast.TFloat -> float_type
   | Ast.TArray(t, Some n) -> Llvm.array_type (mucomp_type_to_llvm t) n
   | Ast.TArray(t, None) (* We treat an empty array as a pointer. *)
   | Ast.TRef(t) -> Llvm.pointer_type (mucomp_type_to_llvm t)
@@ -60,6 +62,7 @@ let get_default_value typ =
   | Ast.TInt -> Llvm.const_int i32_type 0 (* default value for numbers is zero *)
   | Ast.TBool -> Llvm.const_int i1_type 0 (* default values for booleans is false *)
   | Ast.TChar -> Llvm.const_int i8_type 0 (* default values for chars is terminator *)
+  | Ast.TFloat -> Llvm.const_float float_type 0.0
   | Ast.TArray(styp, Some n) ->           (* initialize an array containing only zeros *)
     let lltype = mucomp_type_to_llvm typ in
     let llscalar_type = mucomp_type_to_llvm styp in
@@ -73,31 +76,6 @@ let aux_build_alloca id typ builder =
   match typ with
   | Ast.TArray(_, Some n) -> Llvm.build_array_alloca lltype (Llvm.const_int i32_type n) id builder
   | _ -> Llvm.build_alloca lltype id builder
-
-(* Auxiliar function used to count exit points. *)
-(*
-  let aux_count_exit_points body fun_def =
-    let rec aux node =
-      match node.Ast.node with
-      | Ast.If(_, s1, s2) -> (aux s1) + (aux s2)
-      | Ast.While(_, s1) -> (aux s1)
-      | Ast.For(_, _, _, s1) -> (aux s1)
-      | Ast.Block(stmts) -> (aux' 0 stmts)
-      | Ast.Return(_) -> 1
-      | _ -> 0
-    and aux' acc2 = function
-    | [] -> acc2
-    | annotated_node::tail ->
-      match annotated_node.Ast.node with
-      | Ast.LocalDecl(_) -> aux' acc2 tail
-      | Ast.Stmt(s) -> aux' (acc2 + aux s) tail
-    in 
-    let counted_returns = aux body in
-    if counted_returns > 1 then
-      (counted_returns, Some (Llvm.append_block global_context "ret.merge" fun_def))
-    else
-      (counted_returns, None)
-*)
 
 let unify_blocks f_rtype fun_env =
   let count_aux acc bb =
@@ -279,6 +257,7 @@ and eval_exp node fun_env =
   | Ast.ILiteral(i) -> Llvm.const_int i32_type i
   | Ast.CLiteral(c) -> Llvm.const_int i8_type (int_of_char c)
   | Ast.BLiteral(b) -> Llvm.const_int i1_type (if b then 1 else 0)
+  | Ast.FLiteral(f) -> Llvm.const_float float_type f
 
   | Ast.BinaryOp(bop, e1, e2) ->
     begin
@@ -288,18 +267,40 @@ and eval_exp node fun_env =
       | _ ->
         let new_e1 = eval_exp e1 fun_env in
         let new_e2 = eval_exp e2 fun_env in
-        match (bop) with 
-        | Ast.Add -> Llvm.build_add new_e1 new_e2 "temp.add" fun_env.ibuilder
-        | Ast.Sub -> Llvm.build_sub new_e1 new_e2 "temp.sub" fun_env.ibuilder
-        | Ast.Mult -> Llvm.build_mul new_e1 new_e2 "temp.mult" fun_env.ibuilder
-        | Ast.Div -> Llvm.build_udiv new_e1 new_e2 "temp.div" fun_env.ibuilder
-        | Ast.Mod -> Llvm.build_urem new_e1 new_e2 "temp.rem" fun_env.ibuilder
-        | Ast.Equal -> Llvm.build_icmp (Llvm.Icmp.Eq) new_e1 new_e2 "temp.eq" fun_env.ibuilder
-        | Ast.Neq -> Llvm.build_icmp (Llvm.Icmp.Ne) new_e1 new_e2 "temp.neq" fun_env.ibuilder
-        | Ast.Less -> Llvm.build_icmp (Llvm.Icmp.Slt) new_e1 new_e2 "temp.less" fun_env.ibuilder
-        | Ast.Leq -> Llvm.build_icmp (Llvm.Icmp.Sle) new_e1 new_e2 "temp.leq" fun_env.ibuilder
-        | Ast.Greater -> Llvm.build_icmp (Llvm.Icmp.Sgt) new_e1 new_e2 "temp.greater" fun_env.ibuilder
-        | Ast.Geq -> Llvm.build_icmp (Llvm.Icmp.Sge) new_e1 new_e2 "temp.geq" fun_env.ibuilder
+        match (bop, e1.Ast.annot, e2.Ast.annot) with 
+        | (Ast.Add, Ast.TInt, Ast.TInt)         -> Llvm.build_add new_e1 new_e2 "temp.add" fun_env.ibuilder
+        | (Ast.Add, Ast.TFloat, Ast.TFloat)     -> Llvm.build_fadd new_e1 new_e2 "temp.fadd" fun_env.ibuilder
+        
+        | (Ast.Sub, Ast.TInt, Ast.TInt)         -> Llvm.build_sub new_e1 new_e2 "temp.sub" fun_env.ibuilder
+        | (Ast.Sub, Ast.TFloat, Ast.TFloat)     -> Llvm.build_fsub new_e1 new_e2 "temp.fsub" fun_env.ibuilder
+        
+        | (Ast.Mult, Ast.TInt, Ast.TInt)        -> Llvm.build_mul new_e1 new_e2 "temp.mult" fun_env.ibuilder
+        | (Ast.Mult, Ast.TFloat, Ast.TFloat)    -> Llvm.build_fmul new_e1 new_e2 "temp.fmult" fun_env.ibuilder
+
+        | (Ast.Div, Ast.TInt, Ast.TInt)         -> Llvm.build_udiv new_e1 new_e2 "temp.div" fun_env.ibuilder
+        | (Ast.Div, Ast.TFloat, Ast.TFloat)     -> Llvm.build_fdiv new_e1 new_e2 "temp.fdiv" fun_env.ibuilder
+
+        | (Ast.Mod, Ast.TInt, Ast.TInt)         -> Llvm.build_srem new_e1 new_e2 "temp.rem" fun_env.ibuilder
+        | (Ast.Mod, Ast.TFloat, Ast.TFloat)     -> Llvm.build_frem new_e1 new_e2 "temp.frem" fun_env.ibuilder
+
+        | (Ast.Equal, Ast.TInt, Ast.TInt)       -> Llvm.build_icmp (Llvm.Icmp.Eq) new_e1 new_e2 "temp.eq" fun_env.ibuilder
+        | (Ast.Equal, Ast.TFloat, Ast.TFloat)   -> Llvm.build_fcmp (Llvm.Fcmp.Oeq) new_e1 new_e2 "temp.feq" fun_env.ibuilder
+        
+        | (Ast.Neq, Ast.TInt, Ast.TInt)         -> Llvm.build_icmp (Llvm.Icmp.Ne) new_e1 new_e2 "temp.neq" fun_env.ibuilder
+        | (Ast.Neq, Ast.TFloat, Ast.TFloat)     -> Llvm.build_fcmp (Llvm.Fcmp.One) new_e1 new_e2 "temp.fneq" fun_env.ibuilder
+
+        | (Ast.Less, Ast.TInt, Ast.TInt)        -> Llvm.build_icmp (Llvm.Icmp.Slt) new_e1 new_e2 "temp.less" fun_env.ibuilder
+        | (Ast.Less, Ast.TFloat, Ast.TFloat)    -> Llvm.build_fcmp (Llvm.Fcmp.Oeq) new_e1 new_e2 "temp.fless" fun_env.ibuilder
+        
+        | (Ast.Leq, Ast.TInt, Ast.TInt)         -> Llvm.build_icmp (Llvm.Icmp.Sle) new_e1 new_e2 "temp.leq" fun_env.ibuilder
+        | (Ast.Leq, Ast.TFloat, Ast.TFloat)     -> Llvm.build_fcmp (Llvm.Fcmp.Ole) new_e1 new_e2 "temp.fleq" fun_env.ibuilder
+        
+        | (Ast.Greater, Ast.TInt, Ast.TInt)     -> Llvm.build_icmp (Llvm.Icmp.Sgt) new_e1 new_e2 "temp.greater" fun_env.ibuilder
+        | (Ast.Greater, Ast.TFloat, Ast.TFloat) -> Llvm.build_fcmp (Llvm.Fcmp.Ogt) new_e1 new_e2 "temp.fgreater" fun_env.ibuilder
+        
+        | (Ast.Geq, Ast.TInt, Ast.TInt)         -> Llvm.build_icmp (Llvm.Icmp.Sge) new_e1 new_e2 "temp.geq" fun_env.ibuilder
+        | (Ast.Geq, Ast.TFloat, Ast.TFloat)     -> Llvm.build_fcmp (Llvm.Fcmp.Oge) new_e1 new_e2 "temp.fgeq" fun_env.ibuilder
+        
         | _ -> ignore_pattern ()
     end
 
