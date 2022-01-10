@@ -206,6 +206,13 @@ let rec eval_lv ?(just_address=false) node fun_env load =
       in
       begin
         match (lv.Ast.annot) with
+        | Ast.TArray(Ast.TRef(_), Some _) ->
+          let array_element = Llvm.build_in_bounds_gep lv_llvalue [|(Llvm.const_int i32_type 0); idx|] "" fun_env.ibuilder in
+          if load then
+            let loaded = Llvm.build_load array_element "" fun_env.ibuilder in
+            Llvm.build_load loaded "" fun_env.ibuilder
+          else
+            array_element
         | Ast.TArray(_, Some _) ->
           let array_element = Llvm.build_in_bounds_gep lv_llvalue [|(Llvm.const_int i32_type 0); idx|] "" fun_env.ibuilder in
           if load then

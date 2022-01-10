@@ -151,7 +151,7 @@ let first_pass ast global_table =
         | Ast.VarDecl(vid, vtyp) ->
           begin
             match vtyp with
-            | Ast.TVoid -> raise (Semantic_error(loc, "Variables cannot be declared of type void"))
+            | Ast.TVoid -> raise (Semantic_error(loc, "Variables of type void cannot be declared!"))
             | Ast.TArray(_, Some n) when n <= 0 -> raise (Semantic_error(loc, "Array size must be larger than 1!"))
             | Ast.TArray(t, _) when not(Ast.is_scalar_type t) -> raise (Semantic_error(loc, "Only arrays of scalar types are allowed!"))
             | _ ->
@@ -530,6 +530,7 @@ and type_check_expr fun_env annotated_expr =
 
       | _ -> raise (Semantic_error(loc, "Binary operation not allowed!"))
     end
+
   | Ast.Call(None, fname, exp_actual_list) ->
     
     (* Get the component symbol table *)
@@ -688,7 +689,8 @@ and type_check_stmt fun_env fun_rtype annotated_stmt =
       if Ast.equal_typ (new_exp.Ast.annot) (fun_rtype) then
         (Ast.Return(Some(new_exp))) @> (new_exp.Ast.annot)
       else
-        raise (Semantic_error(loc, "The expression returned by the function does not match the function return type!"))
+        let msg = Printf.sprintf "The expression type returned by the function does not match the return type.\nAn `%s` expression was expected, got `%s` instead!" (Ast.show_type fun_rtype) (Ast.show_type (new_exp.Ast.annot)) in
+        raise (Semantic_error(loc, msg))
   
   | Ast.Block(stmts) ->
     (* Create a new block inside the symbol table *)

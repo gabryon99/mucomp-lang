@@ -77,7 +77,3 @@ void __prelude_putc(char c) {
 void __prelude_putendl() {
   fprintf(stdout, "\n");
 }
-
-void __prelude_print_err(int32_t n) {
-  fprintf(stderr, "%d\n", n);
-}

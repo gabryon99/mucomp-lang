@@ -13,5 +13,4 @@ val lookup : Ast.identifier -> 'a t -> 'a
 val of_alist : (Ast.identifier * 'a) list -> 'a t 
 
 (* Debugging functions, not meant to be used in production.  *)
-val get_bindings_block: 'a t -> (Ast.identifier * 'a) list
 val show : 'a t -> string
