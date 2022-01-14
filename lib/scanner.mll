@@ -174,12 +174,15 @@ and multi_line_comment = parse
   | _                   { multi_line_comment lexbuf }
 and character c = parse
   | [''']               { CHAR(c) }
-  | ['\\']['n']         { character '\n' lexbuf}
-  | ['\\']['t']         { character '\t' lexbuf}
-  | ['\\']['r']         { character '\r' lexbuf}
-  | ['\\']['b']         { character '\b' lexbuf}
-  | ['\\'][''']         { character '\'' lexbuf}
-  | ['\\']['"']         { character '\"' lexbuf}
+  | ['\\']['a']         { character '\x07' lexbuf } (* \a: bell *)
+  | ['\\']['b']         { character '\x08' lexbuf } (* \b: backspace *)
+  | ['\\']['t']         { character '\x09' lexbuf } (* \t: tab escape *)
+  | ['\\']['n']         { character '\x0A' lexbuf } (* \n: new line*)
+  | ['\\']['f']         { character '\x0C' lexbuf } (* \f: form feed *)
+  | ['\\']['r']         { character '\x0D' lexbuf } (* \r: carriage return *)
+
+  | ['\\'][''']         { character '\'' lexbuf }
+  | ['\\']['"']         { character '\"' lexbuf }
   | [^'''] as c         { character c lexbuf }
   | _                   { raise (Lexing_error((Location.to_lexeme_position lexbuf), "Unrecognized character!"))}
 
