@@ -483,13 +483,13 @@ and eval_stmt node fun_env =
 
 and eval_stmtordec node fun_env = 
   match node.Ast.node with
-  | Ast.LocalDecl(vid, vtyp) -> 
+  | Ast.LocalDecl((vid, vtyp), None) -> 
     (* Put llvalue inside the current block *)
     let llvalue = aux_build_alloca vid vtyp fun_env.ibuilder in 
     (* Update symbol table *)
     fun_env.fsym_table <- Symbol_table.add_entry vid llvalue fun_env.fsym_table;
     false
-  | Ast.LocalDeclAndInit((vid, vtyp), exp) ->
+  | Ast.LocalDecl((vid, vtyp), Some exp) ->
     (* Put llvalue inside the current block *)
     let llvalue = aux_build_alloca vid vtyp fun_env.ibuilder in 
     (* Evaluate expression *)
@@ -538,7 +538,7 @@ and eval_member_decl node comp_env decl_st =
     let _ = remove_empty_blocks fun_env in
     ()
 
-  | Ast.VarDecl(vid, vtyp) -> 
+  | Ast.VarDecl((vid, vtyp), None) -> 
     (* Remove the old variable declaration... *)
     let var_name = name_mangling cname vid in 
     let _ = Llvm.delete_global (Symbol_table.lookup var_name decl_st) in
@@ -546,7 +546,7 @@ and eval_member_decl node comp_env decl_st =
     let initialized_value = get_default_value vtyp in 
     let _ = Llvm.define_global var_name initialized_value current_module in ()
 
-  | Ast.VarDeclAndInit((vid, vtyp), exp) -> 
+  | Ast.VarDecl((vid, vtyp), Some exp) -> 
     (* Remove the old variable declaration... *)
     let var_name = name_mangling cname vid in 
     let _ = Llvm.delete_global (Symbol_table.lookup var_name decl_st) in
@@ -574,8 +574,7 @@ and declare_component_members node cname is_main_component current_module acc =
     let fun_decl = Llvm.declare_function fun_name fun_type current_module in
     Symbol_table.add_entry fun_name fun_decl acc
 
-  | Ast.VarDecl(vid, vtyp)
-  | Ast.VarDeclAndInit((vid, vtyp), _) -> 
+  | Ast.VarDecl((vid, vtyp), _) -> 
     let var_lltype = mucomp_type_to_llvm vtyp in 
     let var_name = name_mangling cname vid in 
     let var_decl = Llvm.declare_global var_lltype var_name current_module in    

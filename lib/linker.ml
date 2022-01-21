@@ -143,7 +143,6 @@ and visit_stmts_list current_comp_name component_link_table acc = function
   | [] -> List.rev acc
   | annotated_node::tail -> 
     match (annotated_node.Ast.node) with 
-    | Ast.LocalDeclAndInit(_)
     | Ast.LocalDecl(_) -> visit_stmts_list current_comp_name component_link_table (annotated_node::acc) tail
     | Ast.Stmt(s) -> 
       let new_stmt = (Ast.Stmt(visit_statements current_comp_name component_link_table s)) @> (annotated_node.Ast.annot) in
@@ -152,11 +151,11 @@ and visit_component_definitions current_comp_name component_link_table acc = fun
   | [] -> List.rev acc
   | annotated_node::tail ->
     match (annotated_node.Ast.node) with 
-    | Ast.VarDecl(_) ->
+    | Ast.VarDecl(_, None) ->
       visit_component_definitions current_comp_name component_link_table (annotated_node::acc) tail
-    | Ast.VarDeclAndInit(attr, exp) -> 
+    | Ast.VarDecl(attr, Some exp) -> 
       let new_exp = qualify_call_expression current_comp_name component_link_table exp in
-      let new_var_decl = (Ast.VarDeclAndInit(attr, new_exp)) @> annotated_node.Ast.annot in
+      let new_var_decl = (Ast.VarDecl(attr, Some new_exp)) @> annotated_node.Ast.annot in
       visit_component_definitions current_comp_name component_link_table (new_var_decl::acc) tail
     | Ast.FunDecl({Ast.body = Some s; _} as fd) ->
       let new_stmt = visit_statements current_comp_name component_link_table s in

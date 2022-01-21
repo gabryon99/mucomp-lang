@@ -51,7 +51,7 @@ let first_pass ast global_table =
             let msg = Printf.sprintf "Double identifier `%s` found inside `%s` interface members" fname iname in
             raise (Semantic_error(loc, msg))
         end
-      | Ast.VarDecl(vid, vtyp) ->
+      | Ast.VarDecl((vid, vtyp), None) ->
         let vattr = {id = vid; loc = loc; typ = vtyp} in
         let vsym = SVar({vattr = vattr}) in
         begin
@@ -61,7 +61,7 @@ let first_pass ast global_table =
             let msg = Printf.sprintf "Double identifier `%s` found inside `%s` interface members" vid iname in
             raise (Semantic_error(loc, msg))
         end
-      | Ast.VarDeclAndInit(_, _) -> ignore_pattern ()
+      | Ast.VarDecl(_, _) -> ignore_pattern ()
   in
   let rec visit_interfaces global_table = function
   | [] -> global_table
@@ -147,8 +147,7 @@ let first_pass ast global_table =
               let msg = Printf.sprintf "Double function definition. The function `%s` was already defined in the current scope!" fname in
               raise (Semantic_error(loc, msg))
           end
-        | Ast.VarDeclAndInit((vid, vtyp), _)
-        | Ast.VarDecl(vid, vtyp) ->
+        | Ast.VarDecl((vid, vtyp), _) ->
           begin
             match vtyp with
             | Ast.TVoid -> raise (Semantic_error(loc, "Variables of type void cannot be declared!"))
@@ -240,8 +239,7 @@ let first_pass ast global_table =
                 let msg = Printf.sprintf "The function `%s` defined inside the interface `%s` was not implemented inside the component `%s`!" fname iname cname in
                 raise (Semantic_error(loc, msg))
             end
-          | Ast.VarDeclAndInit(_, _) -> ignore_pattern ()
-          | Ast.VarDecl(ivid, _) ->
+          | Ast.VarDecl((ivid, _), _) ->
             let ivsym = Symbol_table.lookup ivid isym_tbl in
             begin
               try
@@ -333,7 +331,7 @@ let first_pass ast global_table =
 let check_local_decl_type annotated_node =
   let node = annotated_node.Ast.node in 
   let loc = annotated_node.Ast.annot in 
-  let local_decl_typ = match node with Ast.LocalDecl(_, t) -> t | Ast.LocalDeclAndInit((_, t), _) -> t | _ -> ignore_pattern () in
+  let local_decl_typ = match node with Ast.LocalDecl((_, t), _) -> t | _ -> ignore_pattern () in
   match local_decl_typ with 
   | Ast.TVoid -> raise (Semantic_error(loc, "Cannot declare variables of type void!"))
   | Ast.TArray(_, Some n) when n <= 0 -> raise (Semantic_error(loc, "The array size cannot be less than 0!"))
@@ -696,19 +694,19 @@ and type_check_stmt fun_env fun_rtype annotated_stmt =
     (* Create a new block inside the symbol table *)
     let type_check_stmtordec annotated_node (fun_rtype, sym_table) =
       match (annotated_node.Ast.node) with
-      | Ast.LocalDeclAndInit((_, typ) as decl, exp) ->
+      | Ast.LocalDecl((_, typ) as decl, Some exp) ->
         let _ = check_local_decl_type annotated_node in
         let new_exp = type_check_expr fun_env exp in
         (* Let's ensure that expression type is the same as the variable declaration *)
         let res_type_check = type_check_assign typ new_exp.Ast.annot in
         if Result.is_ok res_type_check then
-          (Ast.LocalDeclAndInit(decl, new_exp)) @> (typ)
+          (Ast.LocalDecl(decl, Some new_exp)) @> (typ)
         else
           raise (Semantic_error(loc, Result.get_error res_type_check))
 
-      | Ast.LocalDecl(vdecl) -> 
+      | Ast.LocalDecl(vdecl, None) -> 
         let _ = check_local_decl_type annotated_node in 
-        (Ast.LocalDecl(vdecl)) @> (snd vdecl)
+        (Ast.LocalDecl(vdecl, None)) @> (snd vdecl)
 
       | Ast.Stmt(stmt) ->
         let fun_env = {fun_env with current_symbol_table = sym_table} in
@@ -719,8 +717,7 @@ and type_check_stmt fun_env fun_rtype annotated_stmt =
       let n = annotated_node.Ast.node in 
       let l = annotated_node.Ast.annot in
       match n with
-      | Ast.LocalDeclAndInit((id, typ), _)
-      | Ast.LocalDecl(id, typ) -> 
+      | Ast.LocalDecl((id, typ), _) -> 
         begin
           try
             Symbol_table.add_entry id (SVar({vattr = {id = id; loc = l; typ = typ}})) sym_tbl
@@ -748,9 +745,9 @@ let second_pass ast global_table =
     let node = member_node.Ast.node in 
     let loc = member_node.Ast.annot in
     match node with
-    | Ast.VarDecl(vd) -> (Ast.VarDecl(vd)) @> (snd vd)
+    | Ast.VarDecl(vd, None) -> (Ast.VarDecl(vd, None)) @> (snd vd)
 
-    | Ast.VarDeclAndInit((_, vtyp) as decl, exp) -> 
+    | Ast.VarDecl((_, vtyp) as decl, Some exp) -> 
       let csym_tbl = (match local_sym with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore_pattern ()) in
       let fun_env = {
         component_ast_node = ast_node;
@@ -760,7 +757,7 @@ let second_pass ast global_table =
       let new_exp = type_check_expr fun_env exp in
       let res_type_check = type_check_assign vtyp new_exp.Ast.annot in
       if Result.is_ok res_type_check then
-        (Ast.VarDeclAndInit(decl, new_exp)) @> (vtyp)
+        (Ast.VarDecl(decl, Some new_exp)) @> (vtyp)
       else
         raise (Semantic_error(loc, Result.get_error res_type_check))
 
@@ -783,11 +780,11 @@ let second_pass ast global_table =
   let visit_interface_member member_node =
     let node = member_node.Ast.node in 
     match node with
-    | Ast.VarDecl(vd) -> (Ast.VarDecl(vd)) @> (snd vd)
+    | Ast.VarDecl(vd, None) -> (Ast.VarDecl(vd, None)) @> (snd vd)
     | Ast.FunDecl({Ast.rtype; Ast.fname; Ast.formals; body = None}) -> 
       let formals_type = List.map (snd) formals in
       (Ast.FunDecl({Ast.rtype = rtype; fname = fname; formals = formals; body = None})) @> (Ast.TFun(formals_type, rtype))
-    | Ast.VarDeclAndInit(_, _) -> ignore_pattern () (* Inline variable declaration is not allowed inside interfaces *)
+    | Ast.VarDecl(_, _) -> ignore_pattern () (* Inline variable declaration is not allowed inside interfaces *)
     | Ast.FunDecl(_) -> ignore_pattern () (* Interface function don't have a body! *)
   in
   let visit_component comp_node = 

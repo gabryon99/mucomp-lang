@@ -161,7 +161,7 @@ link:
 ;
 
 i_member_decl:
-  | K_VAR vs = var_sign SEMICOLON { (Ast.VarDecl(vs)) @> $loc }
+  | K_VAR vs = var_sign SEMICOLON { (Ast.VarDecl(vs, None)) @> $loc }
   | fp = fun_proto SEMICOLON { (Ast.FunDecl(fp)) @> $loc }
 ;
 
@@ -191,8 +191,8 @@ fun_proto:
 ;
 
 c_member_decl:
-  | K_VAR vs = var_sign SEMICOLON { (Ast.VarDecl(vs)) @> $loc }
-  | K_VAR vs = var_sign O_ASSIGN e = expr SEMICOLON { (Ast.VarDeclAndInit(vs, e)) @> $loc }
+  | K_VAR vs = var_sign SEMICOLON { (Ast.VarDecl(vs, None)) @> $loc }
+  | K_VAR vs = var_sign O_ASSIGN e = expr SEMICOLON { (Ast.VarDecl(vs, Some e)) @> $loc }
   | fd = fun_decl { (Ast.FunDecl(fd)) @> $loc }
 ;
 
@@ -210,8 +210,8 @@ block:
 
 block_element:
   | s = stmt { (Ast.Stmt(s)) @> $loc }
-  | K_VAR vs = var_sign SEMICOLON { (Ast.LocalDecl(vs)) @> $loc }
-  | K_VAR vs = var_sign O_ASSIGN e = expr SEMICOLON { (Ast.LocalDeclAndInit(vs, e)) @> $loc }
+  | K_VAR vs = var_sign SEMICOLON { (Ast.LocalDecl(vs, None)) @> $loc }
+  | K_VAR vs = var_sign O_ASSIGN e = expr SEMICOLON { (Ast.LocalDecl(vs, Some e)) @> $loc }
 ;
 
 lang_type:

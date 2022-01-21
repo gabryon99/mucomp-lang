@@ -77,8 +77,7 @@ and 'a stmt_node =
 and 'a stmtordec = ('a stmtordec_node, 'a) annotated_node
 
 and 'a stmtordec_node =
-  | LocalDecl of vdecl (* Local variable declaration *)
-  | LocalDeclAndInit of vdecl * 'a expr (* Local variable declaration and assignment i.e. var x: int = 1; *)
+  | LocalDecl of vdecl * 'a expr option (* Local variable declaration and an optional initialization *)
   | Stmt of 'a stmt (* A statement *)
 [@@deriving show, ord, eq]
 
@@ -96,8 +95,7 @@ and 'a member_decl = ('a member_decl_node, 'a) annotated_node
 and 'a member_decl_node =
   (* A member of an interface or of a component *)
   | FunDecl of 'a fun_decl
-  | VarDecl of vdecl
-  | VarDeclAndInit of vdecl * 'a expr
+  | VarDecl of vdecl * 'a expr option
 [@@deriving show, ord, eq]
 
 and 'a interface_decl = ('a interface_decl_node, 'a) annotated_node 
