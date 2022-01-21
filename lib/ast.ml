@@ -170,16 +170,16 @@ let is_compare_operator = function
   | _ -> false
 
 let rec show_type = function 
-  | TInt -> "int"
-  | TChar -> "char"
-  | TBool -> "bool"
-  | TVoid -> "void"
-  | TFloat -> "float"
-  | TRef(t) -> "&" ^ (show_type t) 
-  | TArray(t, _) -> (show_type t) ^ "[]"
-  | TComponent(id) -> ("C" ^ id)
-  | TInterface(id) -> ("I" ^ id)
-  | _ -> "undefined"
+  | TInt            -> "int"
+  | TChar           -> "char"
+  | TBool           -> "bool"
+  | TVoid           -> "void"
+  | TFloat          -> "float"
+  | TRef(t)         -> "&" ^ (show_type t)  (* &type *)
+  | TArray(t, _)    -> (show_type t) ^ "[]" (* type[] *)
+  | TComponent(id)  -> ("C" ^ id) (* C<component_name> *)
+  | TInterface(id)  -> ("I" ^ id) (* I<interface_name> *)
+  | _ -> "undefined_type"
 
 let make_fun_decl rtype fname formals body = {
   rtype = rtype; fname = fname; formals = formals; body = body

@@ -163,7 +163,7 @@ let first_pass ast global_table =
           end
       in
       (* Check if the provides list has the prelude interface *)
-      if List.mem "Prelude" provides then
+      if List.mem Mcomp_stdlib.g_PRELUDE_ID provides then
         raise (Semantic_error(loc, "The Prelude interface cannot be provided by any component!"))
       else
         (* Let's ensure provides and uses lists are disjoint *)
@@ -176,7 +176,7 @@ let first_pass ast global_table =
           let cprov = Symbol_table.begin_block (Symbol_table.empty_table) in 
           let cprov = visit_prov_uses cprov "provides" provides in
           let cuses = Symbol_table.begin_block (Symbol_table.empty_table) in
-          let cuses = visit_prov_uses cuses "uses" (List.cons "Prelude" uses) in
+          let cuses = visit_prov_uses cuses "uses" (Mcomp_stdlib.g_PRELUDE_ID :: uses) in
           (* 
             A component must implement all the members defined in the interfaces it provides,
             so from the defined_interfaces map filter the interfaces provided by the component...
@@ -265,8 +265,9 @@ let first_pass ast global_table =
     let loc = annotated_node.Ast.annot in 
     match node with
     | Ast.ComponentDecl({cname; uses; _}) ->
-      if List.mem "App" uses then
-        raise (Semantic_error(loc, "The App interface cannot be used, just provided once!"))
+      if List.mem Mcomp_stdlib.g_APP_ID uses then
+        let msg = Printf.sprintf "The %s interface cannot be used, just provided once!" Mcomp_stdlib.g_APP_ID in
+        raise (Semantic_error(loc, msg))
       else
       (* Get the component symbol table *)
       let cysm_tbl = (match Symbol_table.lookup cname global_table with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore_pattern ()) in 
@@ -295,7 +296,7 @@ let first_pass ast global_table =
       ) interfaces_nodes in
       check_component_uses global_table interfaces tail
   in
-  let rec check_main_components global_table app_provided = function
+  let rec check_app_interface_presence global_table app_provided = function
   | [] ->
     if not app_provided then
       raise (Semantic_error(Location.dummy_code_pos, "No component provided the App interface."))
@@ -307,25 +308,26 @@ let first_pass ast global_table =
     match node with
     | Ast.ComponentDecl({provides; _}) ->
       (* does the component provide the App interface? *)
-      let temp = List.mem "App" provides in
+      let temp = List.mem Mcomp_stdlib.g_APP_ID provides in
       if app_provided && temp then
         let msg = "There was already a component providing the `App` interface." in
         raise (Semantic_error(loc, msg))
       else
-        check_main_components global_table (app_provided || temp) tail
+        check_app_interface_presence global_table (app_provided || temp) tail
   in
   let (interfaces, components) = (match ast with Ast.CompilationUnit({interfaces; components; _}) -> (interfaces, components)) in
   (* Based the global table table containing the interface symbols, let's get a string map that will be used later with components *)
   (* Preload the `Prelude` and `App` interface into the global symbol table *)
-  let global_table = load_prelude_interface "Prelude" Mcomp_stdlib.prelude_signature global_table in 
-  let global_table = load_prelude_interface "App" Mcomp_stdlib.app_signature global_table in 
+  let global_table = load_prelude_interface Mcomp_stdlib.g_PRELUDE_ID Mcomp_stdlib.prelude_signature global_table in 
+  let global_table = load_prelude_interface Mcomp_stdlib.g_APP_ID Mcomp_stdlib.app_signature global_table in 
   (* Load the interface definitions *)
   let global_table = visit_interfaces global_table interfaces in
   let global_table = visit_components global_table components in
   (* Perform some checks *)
   let global_table = check_component_provides global_table interfaces components in
   let global_table = check_component_uses global_table interfaces components in
-  let global_table = check_main_components global_table false components in
+  (* Is the App interface provided by just one component? *)
+  let global_table = check_app_interface_presence global_table false components in
   global_table
 
 let check_local_decl_type annotated_node =
@@ -344,7 +346,7 @@ let check_fun_return_type annotated_node =
   let rtype = match node with Ast.FunDecl({Ast.rtype = rtype; _}) -> rtype | _ -> ignore_pattern () in
   match rtype with 
   | Ast.TInt | Ast.TBool | Ast.TChar | Ast.TVoid | Ast.TFloat -> ()
-  | _  -> raise (Semantic_error(loc, "A function can only returns int, bool, char or void."))
+  | _  -> raise (Semantic_error(loc, "A function can only returns int, float, bool, char or void."))
 
 let type_check_assign typ1 typ2 =
   match (typ1, typ2) with 
@@ -426,15 +428,13 @@ and type_check_expr fun_env annotated_expr =
 
   | Ast.LV(lv) -> 
     let new_node_lv = type_check_lvalue fun_env lv in
-    begin
-      match (new_node_lv) with
-      | {Ast.annot = typ; _} -> (Ast.LV(new_node_lv)) @> typ
-    end
+    (Ast.LV(new_node_lv)) @> (new_node_lv.Ast.annot)
 
   | Ast.Assign(lv, e) ->
     let new_node_lv = type_check_lvalue fun_env lv in
     let new_node_exp = type_check_expr fun_env e in
-    let type_check_res = type_check_assign new_node_lv.Ast.annot new_node_exp.Ast.annot in 
+    let type_check_res = type_check_assign new_node_lv.Ast.annot new_node_exp.Ast.annot in
+    (* Check if the assignment is valid. If it is not then raise a semantic error by reading the error message. *)
     if Result.is_ok type_check_res then
       (Ast.Assign(new_node_lv, new_node_exp)) @> (new_node_lv.Ast.annot)
     else
@@ -449,26 +449,30 @@ and type_check_expr fun_env annotated_expr =
     let new_node_exp = type_check_expr fun_env exp in 
     begin
       match (uop, new_node_exp.Ast.annot) with
-      | (Ast.Neg, Ast.TInt) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TInt
-      | (Ast.Neg, Ast.TFloat) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TFloat
-      | (Ast.Neg, Ast.TRef(Ast.TInt)) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TInt
+      | (Ast.Neg, Ast.TInt)             -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TInt
+      | (Ast.Neg, Ast.TFloat)           -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TFloat
+      | (Ast.Neg, Ast.TRef(Ast.TInt))   -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TInt
       | (Ast.Neg, Ast.TRef(Ast.TFloat)) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TFloat
-      | (Ast.Neg, Ast.TChar) -> raise (Semantic_error(loc, "Minus operator cannot be applied to a character!"))
-      | (Ast.Neg, Ast.TBool) -> raise (Semantic_error(loc, "Minus operator cannot be applied to a boolean!"))
-      | (Ast.Not, Ast.TBool) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TBool
-      | (Ast.Not, Ast.TRef(Ast.TBool)) -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TBool
-      | (Ast.Not, Ast.TChar) -> raise (Semantic_error(loc, "Not operator cannot be applied to a character!"))
-      | (Ast.Not, Ast.TInt) -> raise (Semantic_error(loc, "Not operator cannot be applied to an integer!"))
-      | (Ast.Not, Ast.TFloat) -> raise (Semantic_error(loc, "Not operator cannot be applied to a float number!"))
-      | _ -> raise (Semantic_error(loc, "Invalid unary operator expression!"))
+
+      | (Ast.Not, Ast.TBool)            -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TBool
+      | (Ast.Not, Ast.TRef(Ast.TBool))  -> (Ast.UnaryOp(uop, new_node_exp)) @> Ast.TBool
+
+      (* Error cases. Neg and Not operator applied with wrong paramater types. *)
+      | (Ast.Neg, wrong_type) ->
+        let msg = Printf.sprintf "Minus operator cannot be applied to %s type!" (Ast.show_type wrong_type) in
+        raise (Semantic_error(loc, msg))
+      | (Ast.Not, wrong_type) -> 
+        let msg = Printf.sprintf "Not operator cannot be applied to %s type!" (Ast.show_type wrong_type) in
+        raise (Semantic_error(loc, msg))
     end
 
   | Ast.DoubleOp(dop, dop_prec, lv) ->
     let new_lv_node = type_check_lvalue fun_env lv in
     begin
       match (new_lv_node.Ast.annot) with 
-      | Ast.TInt -> (Ast.DoubleOp(dop, dop_prec, new_lv_node)) @> (Ast.TInt)
-      | _ -> raise (Semantic_error(loc, "Increment/decrement operator can be applied only to integer variables!")) 
+      | Ast.TInt    -> (Ast.DoubleOp(dop, dop_prec, new_lv_node)) @> (Ast.TInt)
+      | Ast.TFloat  -> (Ast.DoubleOp(dop, dop_prec, new_lv_node)) @> (Ast.TFloat)
+      | _ -> raise (Semantic_error(loc, "Increment/decrement operator can be applied only to numerical types!")) 
     end
 
   | Ast.Address(lv) ->
@@ -567,11 +571,11 @@ and type_check_expr fun_env annotated_expr =
     let rec lookup_provided_interfaces = function
     | [] -> raise (Semantic_error(loc, "Call to an undefined function..."))
     | iname::t ->
-      if iname = "Prelude" then
+      if iname = Mcomp_stdlib.g_PRELUDE_ID then
         let isym_tbl = (match Symbol_table.lookup iname comp_uses_sym_tbl with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore_pattern ()) in
         try
           let ifun_attr = (match Symbol_table.lookup fname isym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!")) | _ -> ignore_pattern ()) in 
-          perform_call_linking (Some "Prelude") ifun_attr
+          perform_call_linking (Some Mcomp_stdlib.g_PRELUDE_ID) ifun_attr
         with Symbol_table.MissingEntry(_) -> 
             lookup_provided_interfaces t
       else
@@ -595,7 +599,7 @@ and type_check_expr fun_env annotated_expr =
         with Symbol_table.MissingEntry(_) ->
           (* Well, the function is not defined inside our component, let's go to search it *)
           (* inside the provided interfaces... *)
-          lookup_provided_interfaces ("Prelude"::comp_uses_identifiers)
+          lookup_provided_interfaces (Mcomp_stdlib.g_PRELUDE_ID::comp_uses_identifiers)
       in
       (* Let's be sure that we are not invoking a variable... *)
       if comp_sym_tbl == current_symbol_table then

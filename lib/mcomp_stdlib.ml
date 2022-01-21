@@ -1,12 +1,16 @@
 open Ast 
 
+(* Some constants used in several phases. *)
+let g_PRELUDE_ID = "Prelude"
+let g_APP_ID = "App"
+
 let prelude_signature = [
   "time",           TFun([], TInt);
   "rand",           TFun([], TInt);
   "putendl",        TFun([], TVoid);
   "getint",         TFun([], TInt);
   "getchar",        TFun([], TChar);
-  "getfloat",        TFun([], TFloat);
+  "getfloat",       TFun([], TFloat);
 
   "set_rand_seed",  TFun([TInt], TVoid);
   "print",          TFun([TInt], TVoid);
