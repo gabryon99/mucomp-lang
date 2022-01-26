@@ -1,7 +1,6 @@
 exception DuplicateEntry of Ast.identifier
 exception MissingEntry of Ast.identifier
 
-(* t = sym_table *)
 type 'a t = 
   | EmptySymbolTable 
   | SymbolTable of { parent: 'a t; table: (Ast.identifier, 'a) Hashtbl.t }

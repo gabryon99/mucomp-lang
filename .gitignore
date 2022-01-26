@@ -34,3 +34,5 @@ _opam/
 .DS_STORE
 
 debug.log
+
+playground/

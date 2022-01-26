@@ -57,6 +57,12 @@
     else
       INT(num)
   
+  let check_character ch is_single lexbuf rule = 
+    if is_single then
+      raise (Lexing_error (Location.to_lexeme_position lexbuf, "Invalid single character!"))
+    else
+      rule ch true lexbuf
+
 }
 
 (* Declaration of regular expressions *)
@@ -102,7 +108,7 @@ rule next_token = parse
                           with Not_found ->
                             check_identifier id lexbuf
                         }
-  | [''']               { character ' ' lexbuf }
+  | [''']               { character ' ' false lexbuf }
   
   | ['0'-'9']+identifier { 
                             (* TODO: what about identifier not starting with _ or [a-zA-Z]*)
@@ -172,18 +178,19 @@ and multi_line_comment = parse
   | "\r\n"              { Lexing.new_line lexbuf; multi_line_comment lexbuf }
   | eof                 { () }
   | _                   { multi_line_comment lexbuf }
-and character c = parse
+and character c is_single = parse
   | [''']               { CHAR(c) }
-  | ['\\']['a']         { character '\x07' lexbuf } (* \a: bell *)
-  | ['\\']['b']         { character '\x08' lexbuf } (* \b: backspace *)
-  | ['\\']['t']         { character '\x09' lexbuf } (* \t: tab escape *)
-  | ['\\']['n']         { character '\x0A' lexbuf } (* \n: new line*)
-  | ['\\']['f']         { character '\x0C' lexbuf } (* \f: form feed *)
-  | ['\\']['r']         { character '\x0D' lexbuf } (* \r: carriage return *)
+  | ['\\']['a']         { check_character '\x07' is_single lexbuf character } (* \a: bell *)
+  | ['\\']['b']         { check_character '\x08' is_single lexbuf character } (* \b: backspace *)
+  | ['\\']['t']         { check_character '\x09' is_single lexbuf character } (* \t: tab escape *)
+  | ['\\']['n']         { check_character '\x0A' is_single lexbuf character } (* \n: new line*)
+  | ['\\']['f']         { check_character '\x0C' is_single lexbuf character } (* \f: form feed *)
+  | ['\\']['r']         { check_character '\x0D' is_single lexbuf character } (* \r: carriage return *)
 
-  | ['\\'][''']         { character '\'' lexbuf }
-  | ['\\']['"']         { character '\"' lexbuf }
-  | [^'''] as c         { character c lexbuf }
+  | ['\\'][''']         { check_character '\'' is_single lexbuf character }
+  | ['\\']['"']         { check_character '\"' is_single lexbuf character }
+  | [^'''] as ch        { check_character ch is_single lexbuf character }
   | _                   { raise (Lexing_error((Location.to_lexeme_position lexbuf), "Unrecognized character!"))}
 
-{}
+{
+}

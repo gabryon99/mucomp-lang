@@ -366,6 +366,7 @@ let type_check_assign typ1 typ2 =
 let rec type_check_lvalue fun_env annotated_lv = 
 
   let component_sym = fun_env.component_sym in 
+  let component_ast_node = fun_env.component_ast_node in
   let function_sym_tbl = fun_env.current_symbol_table in
 
   let node = annotated_lv.Ast.node in 
@@ -389,11 +390,21 @@ let rec type_check_lvalue fun_env annotated_lv =
         end
     end
   | Ast.AccVar(None, var_id) ->
-    let (cname, csym_tbl) = (match component_sym with SComponent({cattr = {id = cname; _}; csym_tbl; _}) -> (cname, csym_tbl) | _ -> ignore_pattern ()) in
+    let (cname, csym_tbl, cuses) = (match component_sym with SComponent({cattr = {id = cname; _}; csym_tbl; cuses; _}) -> (cname, csym_tbl, cuses) | _ -> ignore_pattern ()) in
+    let (comp_uses_identifiers) = (match component_ast_node with Ast.ComponentDecl({uses; _}) -> uses) in
     let check_inside_table name sym_tbl = 
       let sym = Symbol_table.lookup var_id sym_tbl in
-      let typ = (match sym with SVar({vattr = {typ; _}}) -> typ | SFunction({fattr; _}) -> raise (Semantic_error(loc, (Printf.sprintf "Cannot access function `%s.%s` as a value!" cname fattr.id))) | _ -> failwith "Should not happen") in
+      let typ = (match sym with SVar({vattr = {typ; _}}) -> typ | SFunction({fattr; _}) -> raise (Semantic_error(loc, (Printf.sprintf "Cannot access function `%s.%s` as a value!" cname fattr.id))) | _ -> ignore_pattern ()) in
       (Ast.AccVar(name, var_id)) @> typ
+    in
+    let rec lookup_used_interfaces = function
+    | [] -> raise (Semantic_error(loc, "Missing variable declaration!"))
+    | iname::tail ->
+        let isym_tbl = (match Symbol_table.lookup iname cuses with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore_pattern ()) in 
+        try 
+          check_inside_table (Some iname) isym_tbl
+        with Symbol_table.MissingEntry(_) ->
+          lookup_used_interfaces tail
     in
     begin
       try
@@ -410,7 +421,10 @@ let rec type_check_lvalue fun_env annotated_lv =
             (* Is the variable inside the component scope? *)
             check_inside_table (Some(cname)) csym_tbl
           with Symbol_table.MissingEntry(_) ->
-            raise (Semantic_error(loc, "Missing variable definition!"))
+            begin
+              (* As last chance we can only search inside used interfaces. *)
+              lookup_used_interfaces comp_uses_identifiers
+            end
         end
     end
   | _ -> ignore_pattern ()
@@ -568,7 +582,7 @@ and type_check_expr fun_env annotated_expr =
         | _ -> ignore_pattern ()
     in
 
-    let rec lookup_provided_interfaces = function
+    let rec lookup_used_interfaces = function
     | [] -> raise (Semantic_error(loc, "Call to an undefined function..."))
     | iname::t ->
       if iname = Mcomp_stdlib.g_PRELUDE_ID then
@@ -577,7 +591,7 @@ and type_check_expr fun_env annotated_expr =
           let ifun_attr = (match Symbol_table.lookup fname isym_tbl with SFunction({fattr; _}) -> fattr | SVar(_) -> raise (Semantic_error(loc, "Cannot invoke a variable!")) | _ -> ignore_pattern ()) in 
           perform_call_linking (Some Mcomp_stdlib.g_PRELUDE_ID) ifun_attr
         with Symbol_table.MissingEntry(_) -> 
-            lookup_provided_interfaces t
+            lookup_used_interfaces t
       else
         let isym_tbl = (match Symbol_table.lookup iname comp_uses_sym_tbl with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore_pattern ()) in
         try
@@ -585,7 +599,7 @@ and type_check_expr fun_env annotated_expr =
           perform_call_linking (Some iname) ifun_attr
         with 
         | Symbol_table.MissingEntry(_) ->
-            lookup_provided_interfaces t
+            lookup_used_interfaces t
         | Not_found ->
             let msg = Printf.sprintf "Looking for function `%s` failed, since the component `%s` does not link with any component providing the `%s` interface!" fname cname iname in
             raise (Semantic_error(loc, msg))
@@ -599,7 +613,7 @@ and type_check_expr fun_env annotated_expr =
         with Symbol_table.MissingEntry(_) ->
           (* Well, the function is not defined inside our component, let's go to search it *)
           (* inside the provided interfaces... *)
-          lookup_provided_interfaces (Mcomp_stdlib.g_PRELUDE_ID::comp_uses_identifiers)
+          lookup_used_interfaces (Mcomp_stdlib.g_PRELUDE_ID::comp_uses_identifiers)
       in
       (* Let's be sure that we are not invoking a variable... *)
       if comp_sym_tbl == current_symbol_table then

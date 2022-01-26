@@ -88,7 +88,21 @@ let check_connections ast =
   in
   component_sym_table
 
-let rec qualify_call_expression current_comp_name component_link_table node =
+let rec qualify_lvalue current_comp_name component_link_table node =
+  match (node.Ast.node) with
+  | Ast.AccVar(None, _) -> node
+  | Ast.AccVar(Some iname, vid) ->
+    begin
+      try
+        let cname = (match Symbol_table.lookup iname component_link_table with SLink({provide; _}) -> provide | _ -> ignore_pattern ()) in 
+        Ast.AccVar(Some cname, vid) @> (node.Ast.annot)
+      with Symbol_table.MissingEntry(_) ->
+        (* If the interface is not found it means we are accessing a component variable. *)
+       node
+    end
+  | Ast.AccIndex(lv, exp) ->
+      Ast.AccIndex(qualify_lvalue current_comp_name component_link_table lv, exp) @> (node.Ast.annot)
+and qualify_call_expression current_comp_name component_link_table node =
   match (node.Ast.node) with
   | Ast.Call(None, fun_name, exp_list) ->
     let new_exp_list = List.map (qualify_call_expression current_comp_name component_link_table) exp_list in
@@ -97,15 +111,17 @@ let rec qualify_call_expression current_comp_name component_link_table node =
     (* Qualify the interface name... *)
     begin
       try
-        let cname = if iname = "Prelude" then "Prelude" else match Symbol_table.lookup iname component_link_table with SLink({provide; _}) -> provide | _ -> ignore_pattern () in
+        let cname = if iname = Mcomp_stdlib.g_PRELUDE_ID then Mcomp_stdlib.g_PRELUDE_ID else match Symbol_table.lookup iname component_link_table with SLink({provide; _}) -> provide | _ -> ignore_pattern () in
         let new_exp_list = List.map (qualify_call_expression current_comp_name component_link_table) exp_list in
         Ast.Call(Some cname, fun_name, new_exp_list) @> (node.Ast.annot)
       with Symbol_table.MissingEntry(_) ->
         raise (LinkingError(iname))
     end
+  | Ast.LV(lv) -> Ast.LV(qualify_lvalue current_comp_name component_link_table lv) @> (node.Ast.annot)
   | Ast.Assign(lv, exp) ->
+    let new_lv = qualify_lvalue current_comp_name component_link_table lv in
     let new_exp = qualify_call_expression current_comp_name component_link_table exp in
-    (Ast.Assign(lv, new_exp)) @> (node.Ast.annot)
+    (Ast.Assign(new_lv, new_exp)) @> (node.Ast.annot)
   | Ast.UnaryOp(uop, exp) -> 
     let new_exp = qualify_call_expression current_comp_name component_link_table exp in
     (Ast.UnaryOp(uop, new_exp)) @> (node.Ast.annot)
