@@ -381,22 +381,27 @@ and eval_exp node fun_env =
   | Ast.DoubleOp(dop, dop_prec, lv) ->
     begin
       let lv_llvalue = eval_lv lv fun_env true in
-      let one_ll = Llvm.const_int i32_type 1 in
+      let (build_add, build_sub, one_ll) = (match lv.Ast.annot with 
+        | Ast.TInt -> (Llvm.build_add, Llvm.build_sub, Llvm.const_int i32_type 1)
+        | Ast.TFloat -> (Llvm.build_fadd, Llvm.build_fsub, Llvm.const_float float_type 1.0)
+        | _ -> ignore_pattern ()
+      )
+      in
       match (dop, dop_prec) with
       | (Ast.PlusPlus, Ast.Post) ->
-        let plus_one = Llvm.build_add lv_llvalue one_ll "" fun_env.ibuilder in 
+        let plus_one = build_add lv_llvalue one_ll "" fun_env.ibuilder in 
         let _ = Llvm.build_store plus_one (eval_lv lv fun_env false) fun_env.ibuilder in
         lv_llvalue
       | (Ast.PlusPlus, Ast.Pre) -> 
-        let plus_one = Llvm.build_add lv_llvalue one_ll "" fun_env.ibuilder in 
+        let plus_one = build_add lv_llvalue one_ll "" fun_env.ibuilder in 
         let _ = Llvm.build_store plus_one (eval_lv lv fun_env false) fun_env.ibuilder in
         plus_one
       | (Ast.MinMin, Ast.Post) ->
-        let plus_one = Llvm.build_sub lv_llvalue one_ll "" fun_env.ibuilder in 
+        let plus_one = build_sub lv_llvalue one_ll "" fun_env.ibuilder in 
         let _ = Llvm.build_store plus_one (eval_lv lv fun_env false) fun_env.ibuilder in
         lv_llvalue
       | (Ast.MinMin, Ast.Pre) -> 
-        let plus_one = Llvm.build_sub lv_llvalue one_ll "" fun_env.ibuilder in 
+        let plus_one = build_sub lv_llvalue one_ll "" fun_env.ibuilder in 
         let _ = Llvm.build_store plus_one (eval_lv lv fun_env false) fun_env.ibuilder in
         plus_one
     end
