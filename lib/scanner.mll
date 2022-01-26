@@ -110,11 +110,6 @@ rule next_token = parse
                         }
   | [''']               { character ' ' false lexbuf }
   
-  | ['0'-'9']+identifier { 
-                            (* TODO: what about identifier not starting with _ or [a-zA-Z]*)
-                            raise (Lexing_error((Location.to_lexeme_position lexbuf), "Invalid identifier. Identifier must be start with an _ or a letter!")) 
-                         }
-
   (* Logical operators *)
   | ['!']               { L_NOT }
   | "&&"                { L_AND_AND }

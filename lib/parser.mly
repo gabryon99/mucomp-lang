@@ -297,6 +297,7 @@ expr:
   | M_MINUS e = expr %prec U_MINUS {
     (Ast.UnaryOp(Ast.Neg, e)) @> $loc
   }
+
   | L_NOT e = expr %prec U_NOT {
     (Ast.UnaryOp(Ast.Not, e)) @> $loc
   }
@@ -311,10 +312,16 @@ expr:
   | l_value M_PLUS_PLUS {
     (Ast.DoubleOp(Ast.PlusPlus, Ast.Post, $1)) @> $loc
   }
+
   | M_MINUS_MINUS e = expr {
-      let u_exp = Ast.UnaryOp(Ast.Neg, e) @> $loc in
-      (Ast.UnaryOp(Ast.Neg, u_exp)) @> $loc
+      match (e.Ast.node) with
+      | Ast.LV(lv) ->
+        (Ast.DoubleOp(Ast.MinMin, Ast.Pre, lv)) @> $loc
+      | _ ->
+        let u_exp = Ast.UnaryOp(Ast.Neg, e) @> $loc in
+        (Ast.UnaryOp(Ast.Neg, u_exp)) @> $loc
   }
+
   | l_value M_MINUS_MINUS {
     (Ast.DoubleOp(Ast.MinMin, Ast.Post, $1)) @> $loc
   }
