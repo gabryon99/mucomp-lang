@@ -314,6 +314,7 @@ and eval_exp node fun_env =
       | Ast.And -> eval_bool_and_exp e1 e2 fun_env
       | Ast.Or ->  eval_bool_or_exp e1 e2 fun_env
       | _ ->
+
         let new_e1 = eval_exp e1 fun_env in
         let new_e2 = eval_exp e2 fun_env in
         match (bop, e1.Ast.annot, e2.Ast.annot) with 
@@ -336,6 +337,8 @@ and eval_exp node fun_env =
         | (Ast.Equal, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TFloat) && (common_check (t1, t2))    -> Llvm.build_fcmp (Llvm.Fcmp.Oeq) new_e1 new_e2 "temp.feq" fun_env.ibuilder
         
         | (Ast.Neq, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))        -> Llvm.build_icmp (Llvm.Icmp.Ne) new_e1 new_e2 "temp.neq" fun_env.ibuilder
+        | (Ast.Neq, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TBool) && (common_check (t1, t2))       -> Llvm.build_icmp (Llvm.Icmp.Ne) new_e1 new_e2 "temp.neq" fun_env.ibuilder
+        | (Ast.Neq, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TChar) && (common_check (t1, t2))       -> Llvm.build_icmp (Llvm.Icmp.Ne) new_e1 new_e2 "temp.neq" fun_env.ibuilder
         | (Ast.Neq, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TFloat) && (common_check (t1, t2))      -> Llvm.build_fcmp (Llvm.Fcmp.One) new_e1 new_e2 "temp.fneq" fun_env.ibuilder
 
         | (Ast.Less, t1, t2) when (Ast.equal_typ (Ast.base_typ t1) Ast.TInt) && (common_check (t1, t2))       -> Llvm.build_icmp (Llvm.Icmp.Slt) new_e1 new_e2 "temp.less" fun_env.ibuilder

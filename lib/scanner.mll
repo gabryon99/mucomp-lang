@@ -175,6 +175,7 @@ and multi_line_comment = parse
   | _                   { multi_line_comment lexbuf }
 and character c is_single = parse
   | [''']               { CHAR(c) }
+  | ['\\']['0']         { check_character '\x00' is_single lexbuf character } (* \0: terminator *)
   | ['\\']['a']         { check_character '\x07' is_single lexbuf character } (* \a: bell *)
   | ['\\']['b']         { check_character '\x08' is_single lexbuf character } (* \b: backspace *)
   | ['\\']['t']         { check_character '\x09' is_single lexbuf character } (* \t: tab escape *)
