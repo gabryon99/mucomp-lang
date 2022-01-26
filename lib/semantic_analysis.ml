@@ -282,16 +282,17 @@ let first_pass ast global_table =
           let (iname, ideclarations) = (match (iface) with Ast.InterfaceDecl({iname; declarations}) -> (iname, declarations)) in
             (* For each decleration node, check if the function is defined inside the component symbol table *)
             List.iter(fun imember ->
+              let aux' symbol_type name cysm_tbl =
+                try
+                  let _ = Symbol_table.lookup name cysm_tbl in 
+                  let msg = Printf.sprintf "Invalid %s identifier `%s` since the component uses `%s` interface which declares the %s!" symbol_type name iname symbol_type in
+                  raise (Semantic_error(loc, msg))
+                with Symbol_table.MissingEntry(_) -> 
+                  () 
+              in
               match imember.Ast.node with
-              | Ast.FunDecl({Ast.fname; _}) ->
-                begin
-                  try
-                    let _ = Symbol_table.lookup fname cysm_tbl in 
-                    let msg = Printf.sprintf "Invalid function identifier `%s` since the component uses `%s` interface which declares the function!" fname iname in
-                    raise (Semantic_error(loc, msg))
-                  with Symbol_table.MissingEntry(_) -> () 
-                end 
-              | _ -> () (* Field member are ignored! *)
+              | Ast.FunDecl({Ast.fname; _}) -> aux' "function" fname cysm_tbl
+              | Ast.VarDecl((vname, _), _) -> aux' "variable" vname cysm_tbl
             ) ideclarations
       ) interfaces_nodes in
       check_component_uses global_table interfaces tail
