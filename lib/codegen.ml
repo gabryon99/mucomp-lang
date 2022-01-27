@@ -153,22 +153,25 @@ let remove_empty_blocks fun_env =
   List.iter (fun bb -> Llvm.delete_block bb) to_delete
 
 let rec eval_lv ?(just_address=false) node fun_env load =
+
+  let aux_load lv_llvalue typ = 
+    match typ with
+    | Ast.TRef(_) ->
+      if just_address then 
+        lv_llvalue
+      else
+        let l1 = Llvm.build_load lv_llvalue "" fun_env.ibuilder in
+        if load then Llvm.build_load l1 "" fun_env.ibuilder else l1
+    | Ast.TArray(_, Some _) ->
+      Llvm.build_in_bounds_gep lv_llvalue [|(Llvm.const_int i32_type 0); (Llvm.const_int i32_type 0)|] "" fun_env.ibuilder
+    | _ ->
+      if load then Llvm.build_load lv_llvalue "" fun_env.ibuilder else lv_llvalue
+  in
+
   match (node.Ast.node, node.Ast.annot) with
   | (Ast.AccVar(None, vid), typ) -> 
     let lv_llvalue = Symbol_table.lookup vid fun_env.fsym_table in 
-    begin
-      match typ with
-      | Ast.TRef(_) ->
-        if just_address then 
-          lv_llvalue
-        else
-          let l1 = Llvm.build_load lv_llvalue "" fun_env.ibuilder in
-          if load then Llvm.build_load l1 "" fun_env.ibuilder else l1
-      | Ast.TArray(_, Some _) ->
-        Llvm.build_in_bounds_gep lv_llvalue [|(Llvm.const_int i32_type 0); (Llvm.const_int i32_type 0)|] "" fun_env.ibuilder
-      | _ ->
-        if load then Llvm.build_load lv_llvalue "" fun_env.ibuilder else lv_llvalue
-    end
+    aux_load lv_llvalue typ    
 
   | (Ast.AccVar(Some cname, vid), typ) -> 
     let mangled_name = name_mangling cname vid in
@@ -177,19 +180,7 @@ let rec eval_lv ?(just_address=false) node fun_env load =
       match global_var with
       | None -> raise (Codegen_error("Global variable not found!"))
       | Some lv_llvalue -> 
-        begin
-          match typ with
-          | Ast.TRef(_) ->
-            if just_address then 
-              lv_llvalue
-            else
-              let l1 = Llvm.build_load lv_llvalue "" fun_env.ibuilder in
-              if load then Llvm.build_load l1 "" fun_env.ibuilder else l1
-          | Ast.TArray(_, Some _) ->
-            Llvm.build_in_bounds_gep lv_llvalue [|(Llvm.const_int i32_type 0); (Llvm.const_int i32_type 0)|] "" fun_env.ibuilder
-          | _ ->
-            if load then Llvm.build_load lv_llvalue "" fun_env.ibuilder else lv_llvalue
-        end        
+        aux_load lv_llvalue typ
     end
 
   | (Ast.AccIndex(lv, exp), _) ->
