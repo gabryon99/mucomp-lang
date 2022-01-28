@@ -150,11 +150,14 @@ let base_typ = function
   | _ as t -> t
 
 let rec is_scalar_type = function
-  | TInt | TChar | TBool | TFloat -> true
-  | TRef(_) as t -> is_ref_to_scalar_type t
+  | TInt | TChar | TBool | TFloat 
+  | TRef(TInt) | TRef(TChar) | TRef(TBool) | TRef(TFloat) -> true
   | _ -> false
 and is_ref_to_scalar_type = function 
   | TRef(t) -> is_scalar_type t 
+  | _ -> false
+and is_ref = function
+  | TRef(_) -> true
   | _ -> false
 
 let is_math_operator = function 

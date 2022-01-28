@@ -38,30 +38,26 @@ let first_pass ast global_table =
   | annotated_node::tail ->
       let node = annotated_node.Ast.node in 
       let loc = annotated_node.Ast.annot in 
-      match node with 
+      (* Create symbols for function and field variables *)
+      let (sid, symbol) = match node with 
       | Ast.FunDecl({Ast.rtype; fname; formals; _}) ->
         let formals_types = List.map (fun (_, t) -> t) formals in 
         let fattr = {id = fname; loc = loc; typ = Ast.TFun(formals_types, rtype)} in
         let fsym_tbl = Symbol_table.empty_table in
         let fsym = SFunction({fattr = fattr; fsym_tbl = fsym_tbl}) in
-        begin
-          try
-            visit_interface_declarations (Symbol_table.add_entry fname fsym isym_tbl) iname tail 
-          with Symbol_table.DuplicateEntry(_) ->
-            let msg = Printf.sprintf "Double identifier `%s` found inside `%s` interface members" fname iname in
-            raise (Semantic_error(loc, msg))
-        end
+        (fname, fsym)
       | Ast.VarDecl((vid, vtyp), None) ->
         let vattr = {id = vid; loc = loc; typ = vtyp} in
         let vsym = SVar({vattr = vattr}) in
-        begin
-          try
-            visit_interface_declarations (Symbol_table.add_entry vid vsym isym_tbl) iname tail
-          with Symbol_table.DuplicateEntry(_) ->
-            let msg = Printf.sprintf "Double identifier `%s` found inside `%s` interface members" vid iname in
-            raise (Semantic_error(loc, msg))
-        end
+        (vid, vsym)
       | Ast.VarDecl(_, _) -> ignore_pattern ()
+      in
+      try
+        (* Try to insert the member symbol inside the interface symbol table and move to next member *)
+        visit_interface_declarations (Symbol_table.add_entry sid symbol isym_tbl) iname tail
+      with Symbol_table.DuplicateEntry(_) ->
+        let msg = Printf.sprintf "Double identifier `%s` found inside `%s` interface members" sid iname in
+        raise (Semantic_error(loc, msg))
   in
   let rec visit_interfaces global_table = function
   | [] -> global_table
@@ -77,6 +73,7 @@ let first_pass ast global_table =
         let isym_tbl = visit_interface_declarations isym_tbl iname declarations in
         (* Create a new symbol to be inserted inside the global symbol table *)
         let isym = SInterface({iattr = iattr; isym_tbl = isym_tbl}) in
+        (* Visit the remaining interfaces *)
         visit_interfaces (Symbol_table.add_entry iname isym global_table) tail
   in
   let rec visit_components global_table = function
@@ -351,10 +348,10 @@ let check_fun_return_type annotated_node =
 
 let type_check_assign typ1 typ2 =
   match (typ1, typ2) with 
-  (* Case: T1 <- T2 <== T1=T2 && Scalar(T1) *)
-  | (t1, t2) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> Result.ok true
-  (* Case: T1 <- &T1 <== Scalar(T1) *)
-  | (t1, Ast.TRef(t2)) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> Result.ok true
+  (* Case: T1 <- T2 <== T1=T2 && Scalar(T1) && Scalar(T2) *)
+  | (t1, t2) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) && (Ast.is_scalar_type t2) -> Result.ok true
+  (* Case: T1 <- &T1 <== Scalar(T1) && !Ref(T2) *)
+  | (t1, Ast.TRef(t2)) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) && not(Ast.is_ref t2) -> Result.ok true
   (* Case: &T1 <- &T2 <== T1==T2 && Scalar(T1) *)
   | (Ast.TRef(t1), Ast.TRef(t2)) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> Result.ok true
   (* Case: &T1 <- T2 <== T1==T2 && Scalar(T1) *)
@@ -676,26 +673,14 @@ and type_check_stmt fun_env fun_rtype annotated_stmt =
     let sym_table = Symbol_table.begin_block function_sym_tbl in
     let fun_env = {fun_env with current_symbol_table = sym_table} in
     let new_for_stmt = type_check_stmt fun_env fun_rtype for_stmt in
+    let new_e1 = match e1 with Some(e1) -> Some (type_check_expr fun_env e1) | None -> None in
+    let new_e2 = match e2 with Some(e2) -> (type_check_expr fun_env e2) | None -> (Ast.BLiteral(true) @> Ast.TBool) in
+    let new_e3 = match e3 with Some(e3) -> Some (type_check_expr fun_env e3) | None -> None in
     begin
-      match (e1, e2, e3) with
-      | (Some(e1), Some(e2), Some(e3)) ->
-        let new_e1 = type_check_expr fun_env e1 in
-        let new_e2 = type_check_expr fun_env e2 in
-        let new_e3 = type_check_expr fun_env e3 in
-        begin
-          match (new_e2.Ast.annot) with
-          | Ast.TBool -> (Ast.For(Some new_e1, Some new_e2, Some new_e3, new_for_stmt)) @> (Ast.TVoid)
-          | _ -> raise (Semantic_error(loc, "The for guard is not a boolean expression!"))
-        end
-      | (None, Some(e2), None) ->
-        let new_e2 = type_check_expr fun_env e2 in
-        begin
-          match (new_e2.Ast.annot) with
-          | Ast.TBool -> (Ast.For(None, Some new_e2, None, new_for_stmt)) @> (Ast.TVoid)
-          | _ -> raise (Semantic_error(loc, "The for guard is not a boolean expression!"))
-        end
-      | (None, None, None) -> (Ast.For(None, None, None, new_for_stmt)) @> (Ast.TVoid)
-      | _ -> ignore_pattern ()
+      (* Check if the second expression evaluates to a boolean one *)
+      match new_e2.Ast.annot with
+      | Ast.TBool -> Ast.For(new_e1, Some new_e2, new_e3, new_for_stmt) @> (Ast.TVoid)
+      | _ -> raise (Semantic_error(loc, "The for guard is not a boolean expression!"))
     end
   
   | Ast.Return(None) -> (Ast.Return(None)) @> Ast.TVoid
