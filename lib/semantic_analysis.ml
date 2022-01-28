@@ -21,17 +21,25 @@ type 'a fun_env = {
 
 (** The function performs semantic-rule checks as described by the specification. *)
 let first_pass ast global_table = 
-  let load_prelude_interface prelude_name prelude_list global_table =
-    let prelude_list = List.map (
+  (* Create a new interface symbol and new interface decleration from an interface signature *)
+  let load_standard_interface prelude_name prelude_list global_table =
+    (* Create function symbols *)
+    let function_symbols = List.map (
       fun (fname, ftyp) ->
         let fattr = {id = fname; loc = Location.dummy_code_pos; typ = ftyp} in 
         let fsym = SFunction({fattr = fattr; fsym_tbl = Symbol_table.empty_table}) in
         (fname, fsym)
     ) prelude_list in
+    let member_node_list = List.map (
+      fun (fname, ftyp) ->
+        Ast.FunDecl({Ast.rtype = ftyp; fname = fname; formals = []; body = None}) @> Location.dummy_code_pos
+    ) prelude_list in
+    (* Define interface symbol and node declaration *)
     let iattr = {id = prelude_name; loc = Location.dummy_code_pos; typ = Ast.TInterface(prelude_name)} in 
-    let isym_tbl = Symbol_table.of_alist prelude_list in 
+    let isym_tbl = Symbol_table.of_alist function_symbols in 
     let isym = SInterface({iattr = iattr; isym_tbl}) in
-    Symbol_table.add_entry prelude_name isym global_table
+    let inode = (Ast.InterfaceDecl({iname = prelude_name; declarations = member_node_list})) @> Location.dummy_code_pos in
+    (Symbol_table.add_entry prelude_name isym global_table, inode)
   in
   let rec visit_interface_declarations isym_tbl iname = function
   | [] -> isym_tbl
@@ -129,8 +137,6 @@ let first_pass ast global_table =
           in
           let formals_types = List.map (fun (_, t) -> t) formals in 
           let ftyp = Ast.TFun(formals_types, rtype) in
-          (* Let's check prelude function... *)
-          List.iter (fun (name, _) -> if (name = fname) then raise (Semantic_error(loc, "Cannot define the function since it is contained in the prelude!")) else ()) Mcomp_stdlib.prelude_signature;
           let fattr = {id = fname; loc = loc; typ = ftyp} in
           let fsym_tbl = Symbol_table.begin_block (Symbol_table.empty_table) in
           (* fill function symbol table with arguments... *)
@@ -174,10 +180,6 @@ let first_pass ast global_table =
           let cprov = visit_prov_uses cprov "provides" provides in
           let cuses = Symbol_table.begin_block (Symbol_table.empty_table) in
           let cuses = visit_prov_uses cuses "uses" (Mcomp_stdlib.g_PRELUDE_ID :: uses) in
-          (* 
-            A component must implement all the members defined in the interfaces it provides,
-            so from the defined_interfaces map filter the interfaces provided by the component...
-          *)
           (* Build component symbol table containing all the definitions inside a component (fields/functions) *)
           let csym_tbl = Symbol_table.begin_block (Symbol_table.empty_table) in 
           let csym_tbl = visit_member_definitions csym_tbl definitions in
@@ -188,7 +190,8 @@ let first_pass ast global_table =
           with Symbol_table.DuplicateEntry(_) ->
             (* Check for duplicated symbol identifier *)
             begin
-              let dup_sym = Symbol_table.lookup cname global_table in (* A MissingEntry exception cannot be thrown since the name is contained inside the table already *)
+              (* A MissingEntry exception cannot be thrown since the name is contained inside the table already *)
+              let dup_sym = Symbol_table.lookup cname global_table in 
               match dup_sym with 
               | SInterface(_) -> 
                 let msg = Printf.sprintf "Component name not valid since it seems that an interface named` %s` already exists." cname in
@@ -262,39 +265,67 @@ let first_pass ast global_table =
     let loc = annotated_node.Ast.annot in 
     match node with
     | Ast.ComponentDecl({cname; uses; _}) ->
+      let check_name_clahses used_interfaces = 
+        let rec aux table = function
+        | [] -> ()
+        | iface::tail ->
+          (* Insert interface member definitions into the symbol table *)
+          let (iname, idecls) = match iface with Ast.InterfaceDecl({iname; declarations;}) -> (iname, declarations) in
+          let table = List.fold_left (fun acc member -> 
+            match (member.Ast.node) with
+            | Ast.FunDecl({Ast.fname = id; _})
+            | Ast.VarDecl((id, _), _) -> 
+              try
+                (* Try to add the name to the symbol table *)
+                Symbol_table.add_entry id iname acc
+              with Symbol_table.DuplicateEntry(_) ->
+                (* If the add operation failed it means that there is a name clasing between interface members *)
+                let old_interface_name = Symbol_table.lookup id acc in
+                let msg = Printf.sprintf "The name '%s' deriving from the used interface '%s' collides with the one coming from '%s'!" id iname old_interface_name in
+                raise (Semantic_error(loc, msg))
+          ) table idecls in
+          aux table tail
+        in
+        aux (Symbol_table.empty_table |> Symbol_table.begin_block) used_interfaces
+      in
+      (* Check if the App interface is used! *)
       if List.mem Mcomp_stdlib.g_APP_ID uses then
-        let msg = Printf.sprintf "The %s interface cannot be used, just provided once!" Mcomp_stdlib.g_APP_ID in
+        let msg = Printf.sprintf "The %s interface cannot be used, but just provided once!" Mcomp_stdlib.g_APP_ID in
         raise (Semantic_error(loc, msg))
       else
       (* Get the component symbol table *)
       let cysm_tbl = (match Symbol_table.lookup cname global_table with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore_pattern ()) in 
       (* Get a list of interfaces nodes from uses list *)
-      let interfaces_nodes = List.map (fun iname -> find_interface iname interfaces) uses in
-      (* Check if the component define function member coming by the interfaces *)
-      let _ = List.iter(fun iface_node ->
-        match iface_node with
-        | None -> ()
-        | Some iface ->
-          (* Get the interface name and decleration from th interface node *)
-          let (iname, ideclarations) = (match (iface) with Ast.InterfaceDecl({iname; declarations}) -> (iname, declarations)) in
-            (* For each decleration node, check if the function is defined inside the component symbol table *)
-            List.iter(fun imember ->
-              let aux' symbol_type name cysm_tbl =
-                try
-                  let _ = Symbol_table.lookup name cysm_tbl in 
-                  let msg = Printf.sprintf "Invalid %s identifier `%s` since the component uses `%s` interface which declares the %s!" symbol_type name iname symbol_type in
-                  raise (Semantic_error(loc, msg))
-                with Symbol_table.MissingEntry(_) -> 
-                  () 
-              in
-              match imember.Ast.node with
-              | Ast.FunDecl({Ast.fname; _}) -> aux' "function" fname cysm_tbl
-              | Ast.VarDecl((vname, _), _) -> aux' "variable" vname cysm_tbl
-            ) ideclarations
+      let interfaces_nodes = List.fold_left (fun acc iname -> 
+        match find_interface iname interfaces with 
+        | None -> acc
+        | Some(i) -> i::acc
+      ) [] (Mcomp_stdlib.g_PRELUDE_ID :: uses) |> List.rev in
+      (* Check name clashes... *)
+      let _ = check_name_clahses interfaces_nodes in
+      (* Check if the component define function member coming by used interfaces *)
+      let _ = List.iter(fun iface ->
+        (* Get the interface name and decleration from th interface node *)
+        let (iname, ideclarations) = (match (iface) with Ast.InterfaceDecl({iname; declarations}) -> (iname, declarations)) in
+          Mcomp_stdlib.print_debug (iname);
+          (* For each decleration node, check if the function is defined inside the component symbol table *)
+          List.iter(fun imember ->
+            let aux' symbol_type name cysm_tbl =
+              try
+                let _ = Symbol_table.lookup name cysm_tbl in 
+                let msg = Printf.sprintf "Invalid %s identifier `%s` since the component uses `%s` interface which declares %s member!" symbol_type name iname symbol_type in
+                raise (Semantic_error(loc, msg))
+              with Symbol_table.MissingEntry(_) -> 
+                () 
+            in
+            match imember.Ast.node with
+            | Ast.FunDecl({Ast.fname; _}) -> aux' "function" fname cysm_tbl
+            | Ast.VarDecl((vname, _), _) -> aux' "variable" vname cysm_tbl
+          ) ideclarations
       ) interfaces_nodes in
       check_component_uses global_table interfaces tail
   in
-  let rec check_app_interface_presence global_table app_provided = function
+  let rec check_app_interface_existance global_table app_provided = function
   | [] ->
     if not app_provided then
       raise (Semantic_error(Location.dummy_code_pos, "No component provided the App interface."))
@@ -305,27 +336,27 @@ let first_pass ast global_table =
     let loc = annotated_node.Ast.annot in 
     match node with
     | Ast.ComponentDecl({provides; _}) ->
-      (* does the component provide the App interface? *)
+      (* Does the component provide the App interface? *)
       let temp = List.mem Mcomp_stdlib.g_APP_ID provides in
       if app_provided && temp then
         let msg = "There was already a component providing the `App` interface." in
         raise (Semantic_error(loc, msg))
       else
-        check_app_interface_presence global_table (app_provided || temp) tail
+        check_app_interface_existance global_table (app_provided || temp) tail
   in
   let (interfaces, components) = (match ast with Ast.CompilationUnit({interfaces; components; _}) -> (interfaces, components)) in
   (* Based the global table table containing the interface symbols, let's get a string map that will be used later with components *)
   (* Preload the `Prelude` and `App` interface into the global symbol table *)
-  let global_table = load_prelude_interface Mcomp_stdlib.g_PRELUDE_ID Mcomp_stdlib.prelude_signature global_table in 
-  let global_table = load_prelude_interface Mcomp_stdlib.g_APP_ID Mcomp_stdlib.app_signature global_table in 
-  (* Load the interface definitions *)
+  let (global_table, prelude_inode) = load_standard_interface Mcomp_stdlib.g_PRELUDE_ID Mcomp_stdlib.prelude_signature global_table in 
+  let (global_table, _) = load_standard_interface Mcomp_stdlib.g_APP_ID Mcomp_stdlib.app_signature global_table in 
+  (* Load the interface and component definitions *)
   let global_table = visit_interfaces global_table interfaces in
   let global_table = visit_components global_table components in
   (* Perform some checks *)
   let global_table = check_component_provides global_table interfaces components in
-  let global_table = check_component_uses global_table interfaces components in
+  let global_table = check_component_uses global_table (prelude_inode :: interfaces) components in
   (* Is the App interface provided by just one component? *)
-  let global_table = check_app_interface_presence global_table false components in
+  let global_table = check_app_interface_existance global_table false components in
   global_table
 
 let check_local_decl_type annotated_node =
