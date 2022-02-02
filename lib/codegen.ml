@@ -513,7 +513,8 @@ and eval_member_decl node comp_env decl_st =
     let fun_type = mucomp_type_to_llvm (node.Ast.annot) in
     let fun_def = Llvm.define_function fun_name fun_type current_module in
     (* Build a new instruction builder to generate instruction for the function *)
-    let fun_ibuilder = Llvm.builder_at_end global_context (Llvm.entry_block fun_def) in
+    let entrybb = Llvm.entry_block fun_def in
+    let fun_ibuilder = Llvm.builder_at_end global_context entrybb in
     (* Allocate and store function paramaters inside the stack. *)
     let fun_st = List.fold_left (fun acc (idx, (vid, vtyp)) -> 
       let param_stack = aux_build_alloca vid vtyp fun_ibuilder in
@@ -521,7 +522,6 @@ and eval_member_decl node comp_env decl_st =
       let _ = Llvm.build_store param param_stack fun_ibuilder in 
       Symbol_table.add_entry vid param_stack acc
     ) fun_st (Mcomp_stdlib.list_zip_with_index formals) in
-    let _ = Llvm.position_at_end (Llvm.entry_block fun_def) fun_ibuilder in
     (* Evaluate statement. *)
     let fun_env = {
       fsym_table = fun_st; 

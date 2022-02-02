@@ -38,7 +38,7 @@ let list_zip_with_index l1 =
   let rec aux idx acc = function
   | [] -> acc
   | h::t -> aux (idx + 1) ((idx, h)::acc) t in 
-  aux 0 [] l1
+  (aux 0 [] l1) |> List.rev
 
 (* 
 * If an LLVM module contains error, the stdout will be deleted, therefore 
