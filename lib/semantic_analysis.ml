@@ -123,10 +123,10 @@ let first_pass ast global_table =
         match node with
         | Ast.FunDecl({Ast.rtype; fname; formals; _}) ->
           let aux_fold fsym_tbl (vid, vtyp) =
-            (* TODO: type checking on formals *)
-            if Ast.equal_typ vtyp Ast.TVoid then
-              raise (Semantic_error(loc, "The formal parameter cannot be a void type!"))
-            else
+            match (vtyp) with
+            | Ast.TVoid -> raise (Semantic_error(loc, "The formal parameters cannot be a void type!"))
+            | Ast.TArray(_, Some _) -> raise (Semantic_error(loc, "Array references do not need a size!"))
+            | _ -> 
               let vattr = {id = vid; loc = loc; typ = vtyp} in
               let vsym = SVar({vattr = vattr}) in
               try
@@ -213,7 +213,9 @@ let first_pass ast global_table =
     let loc = annotated_node.Ast.annot in
     match node with
     | Ast.ComponentDecl({cname; provides; _}) ->
+      (* Take component symbol from the global symbol table *)
       let cysm_tbl = (match Symbol_table.lookup cname global_table with SComponent({csym_tbl; _}) -> csym_tbl | _ -> ignore_pattern ()) in 
+      (* Extract the interface nodes from the AST *)
       let interfaces_nodes = List.map (fun iname -> find_interface iname interfaces) provides in
       let _ = List.iter(fun i ->
         match i with 
@@ -221,6 +223,7 @@ let first_pass ast global_table =
         | Some iface ->
         let (iname, ideclarations) = (match (iface) with Ast.InterfaceDecl({iname; declarations}) -> (iname, declarations)) in
         let isym_tbl = (match Symbol_table.lookup iname global_table with SInterface({isym_tbl; _}) -> isym_tbl | _ -> ignore_pattern ()) in
+        (* Check if the component provides each field of a given interface *)
         List.iter (fun imember -> 
           let imember_node = imember.Ast.node in 
           match imember_node with
@@ -228,9 +231,11 @@ let first_pass ast global_table =
             let ifsym = Symbol_table.lookup fname isym_tbl in
             begin
               try
+                (* Is the function defined inside the component? *)
                 let cfsym = Symbol_table.lookup fname cysm_tbl in
                 match (ifsym, cfsym) with
                 | (SFunction({fattr = {typ = iftyp; _}; _}), SFunction({fattr = {typ = cityp; loc = cloc; _}; _})) -> 
+                  (* Is the function type equal to the one described by the interface? *)
                   if not(Ast.equal_typ iftyp cityp) then
                     let msg = Printf.sprintf "The function `%s.%s` type mismatch with the one defined in the interface `%s`!" cname fname iname in 
                     raise (Semantic_error(cloc, msg))
@@ -243,9 +248,11 @@ let first_pass ast global_table =
             let ivsym = Symbol_table.lookup ivid isym_tbl in
             begin
               try
+                (* Is the variable defined inside the component? *)
                 let cvsym = Symbol_table.lookup ivid cysm_tbl in
                 match (ivsym, cvsym) with
                 | (SVar({vattr = {typ = ivtyp; _}}), SVar({vattr = {typ = cvtyp; loc = cloc; _}})) -> 
+                  (* Is the variable type equal to the one described by the interface? *)
                   if not(Ast.equal_typ ivtyp cvtyp) then
                     let msg = Printf.sprintf "The field `%s.%s` type mismatch with the one defined in the interface `%s`!" cname ivid iname in 
                     raise (Semantic_error(cloc, msg))
@@ -381,7 +388,7 @@ let type_check_assign typ1 typ2 =
   match (typ1, typ2) with 
   (* Case: T1 <- T2 <== T1=T2 && Scalar(T1) && Scalar(T2) *)
   | (t1, t2) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) && (Ast.is_scalar_type t2) -> Result.ok true
-  (* Case: T1 <- &T1 <== Scalar(T1) && !Ref(T2) *)
+  (* Case: T1 <- &T2 <== Scalar(T1) && T1=T2 && !Ref(T2) *)
   | (t1, Ast.TRef(t2)) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) && not(Ast.is_ref t2) -> Result.ok true
   (* Case: &T1 <- &T2 <== T1==T2 && Scalar(T1) *)
   | (Ast.TRef(t1), Ast.TRef(t2)) when (Ast.equal_typ t1 t2) && (Ast.is_scalar_type t1) -> Result.ok true
@@ -662,7 +669,6 @@ and type_check_expr fun_env annotated_expr =
 and type_check_stmt fun_env fun_rtype annotated_stmt = 
 
   let function_sym_tbl = fun_env.current_symbol_table in
-
   let node = annotated_stmt.Ast.node in 
   let loc = annotated_stmt.Ast.annot in
 
@@ -672,7 +678,6 @@ and type_check_stmt fun_env fun_rtype annotated_stmt =
     let sym_table = Symbol_table.begin_block function_sym_tbl in
     let fun_env = {fun_env with current_symbol_table = sym_table} in
     let new_then_stmt = type_check_stmt fun_env fun_rtype then_stmt in
-    let sym_table = Symbol_table.end_block sym_table in 
     let sym_table = Symbol_table.begin_block sym_table in
     let fun_env = {fun_env with current_symbol_table = sym_table} in
     let new_else_stmt = type_check_stmt fun_env fun_rtype else_stmt in
@@ -820,7 +825,7 @@ let second_pass ast global_table =
       let formals_type = List.map (snd) formals in
       (Ast.FunDecl({Ast.rtype = rtype; fname = fname; formals = formals; body = None})) @> (Ast.TFun(formals_type, rtype))
     | Ast.VarDecl(_, _) -> ignore_pattern () (* Inline variable declaration is not allowed inside interfaces *)
-    | Ast.FunDecl(_) -> ignore_pattern () (* Interface function don't have a body! *)
+    | Ast.FunDecl(_) -> ignore_pattern () (* Interface functions don't have a body! *)
   in
   let visit_component comp_node = 
     let node = comp_node.Ast.node in
@@ -846,5 +851,4 @@ let second_pass ast global_table =
 
 let type_check ast = 
   let global_table = Symbol_table.begin_block (Symbol_table.empty_table) in
-  let global_table = first_pass ast global_table in
-  second_pass ast global_table
+  first_pass ast global_table |> second_pass ast

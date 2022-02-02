@@ -19,9 +19,9 @@ let check_connections ast =
   in
   let rec visit_connections connections component_sym_table = match connections with
   | [] -> component_sym_table
-  | (Ast.Link(c1, _, c2, _))::_ when (c1 = "Prelude") || (c2 = "Prelude") ->
+  | (Ast.Link(c1, _, c2, _))::_ when (c1 = Mcomp_stdlib.g_PRELUDE_ID) || (c2 = Mcomp_stdlib.g_PRELUDE_ID) ->
     raise (LinkingError("Link to Prelude interface cannot be specified!"))
-  | (Ast.Link(c1, _, c2, _))::_ when (c1 = "App") || (c2 = "App") ->
+  | (Ast.Link(c1, _, c2, _))::_ when (c1 = Mcomp_stdlib.g_APP_ID) || (c2 = Mcomp_stdlib.g_APP_ID) ->
     raise (LinkingError("Link to App interface cannot be specified!"))
   | (Ast.Link(c1, i1, c2, i2))::tail -> 
       (* Verify connection integrity: *)

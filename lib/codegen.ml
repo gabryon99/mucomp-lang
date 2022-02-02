@@ -521,7 +521,6 @@ and eval_member_decl node comp_env decl_st =
       let _ = Llvm.build_store param param_stack fun_ibuilder in 
       Symbol_table.add_entry vid param_stack acc
     ) fun_st (Mcomp_stdlib.list_zip_with_index formals) in
-    (* Counts how many exit points are inside the function *)
     let _ = Llvm.position_at_end (Llvm.entry_block fun_def) fun_ibuilder in
     (* Evaluate statement. *)
     let fun_env = {
@@ -637,7 +636,7 @@ let compile_code ast =
   let global_var_init = define_global_var_init ctors global_module in
 
   (* Declare prelude functions *)
-  let _ = List.iter (fun (id, typ) -> let _ = Llvm.declare_function (name_mangling "Prelude" id) (mucomp_type_to_llvm typ) global_module in ()) Mcomp_stdlib.prelude_signature in
+  let _ = List.iter (fun (id, typ) -> let _ = Llvm.declare_function (name_mangling Mcomp_stdlib.g_PRELUDE_ID id) (mucomp_type_to_llvm typ) global_module in ()) Mcomp_stdlib.prelude_signature in
   (* Declare components *)
   let components = match ast with Ast.CompilationUnit(cu) -> cu.components in 
   let temp_st = List.fold_left (fun acc c -> declare_component c global_module acc) (Symbol_table.begin_block (Symbol_table.empty_table)) components in

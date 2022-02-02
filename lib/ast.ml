@@ -164,6 +164,10 @@ let is_math_operator = function
   | Add | Sub | Mult | Div | Mod -> true 
   | _ -> false
 
+let is_numerical_type = function
+  | TInt | TFloat -> true
+  | _ -> false
+
 let is_bool_operator = function 
   | And | Or -> true 
   | _ -> false
