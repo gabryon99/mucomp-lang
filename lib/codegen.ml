@@ -6,6 +6,7 @@ type fun_env = {
   fun_def: Llvm.llvalue;                        (* The function definition. *)
   current_module: Llvm.llmodule;                (* The current module where the function is defined. *)
   ibuilder: Llvm.llbuilder;                     (* The function instruction builder to emit code. *)
+  mutable latest_alloca_instr: Llvm.llvalue option;
 }
 
 type global_env = {
@@ -69,12 +70,30 @@ let get_default_value typ =
     Llvm.const_array llscalar_type initial_array_values
   | _ -> ignore_pattern ()
 
-(* Auxiliar function to build an alloca instruction depending on the value type. *)
-let aux_build_alloca id typ builder =
+(* 
+  Auxiliar function to build an alloca instruction depending on the value type. 
+  The alloca instructions are hoisted above, just after the function entry.
+*)
+let aux_build_alloca id typ fun_env =
+  (* Store current block *)
+  let current_bblock = Llvm.insertion_block fun_env.ibuilder in
+  let _ = match fun_env.latest_alloca_instr with
+    | None -> ()
+    | Some instr ->
+      let pos = Llvm.instr_succ instr in
+      Llvm.position_builder pos fun_env.ibuilder;
+  in
+  (* Get the type for the alloca instruction *)
   let lltype = mucomp_type_to_llvm typ in 
-  match typ with
-  | Ast.TArray(_, Some n) -> Llvm.build_array_alloca lltype (Llvm.const_int i32_type n) id builder
-  | _ -> Llvm.build_alloca lltype id builder
+  (* Build alloca instruction *)
+  let llalloca = match typ with
+    | Ast.TArray(_, Some n) -> Llvm.build_array_alloca lltype (Llvm.const_int i32_type n) id fun_env.ibuilder
+    | _ -> Llvm.build_alloca lltype id fun_env.ibuilder in
+  (* Remember latest alloca instruction for future insertions *)
+  fun_env.latest_alloca_instr <- Some llalloca;
+  (* Restore old builder position *)
+  Llvm.position_at_end current_bblock fun_env.ibuilder;
+  llalloca
 
 let unify_blocks f_rtype fun_env =
   let count_aux acc bb =
@@ -484,13 +503,13 @@ and eval_stmtordec node fun_env =
   match node.Ast.node with
   | Ast.LocalDecl((vid, vtyp), None) -> 
     (* Put llvalue inside the current block *)
-    let llvalue = aux_build_alloca vid vtyp fun_env.ibuilder in 
+    let llvalue = aux_build_alloca vid vtyp fun_env in
     (* Update symbol table *)
     fun_env.fsym_table <- Symbol_table.add_entry vid llvalue fun_env.fsym_table;
     false
   | Ast.LocalDecl((vid, vtyp), Some exp) ->
     (* Put llvalue inside the current block *)
-    let llvalue = aux_build_alloca vid vtyp fun_env.ibuilder in 
+    let llvalue = aux_build_alloca vid vtyp fun_env in 
     (* Evaluate expression *)
     let llv_exp = eval_exp exp fun_env in
     (* Build store instruction. *)
@@ -515,20 +534,22 @@ and eval_member_decl node comp_env decl_st =
     (* Build a new instruction builder to generate instruction for the function *)
     let entrybb = Llvm.entry_block fun_def in
     let fun_ibuilder = Llvm.builder_at_end global_context entrybb in
-    (* Allocate and store function paramaters inside the stack. *)
-    let fun_st = List.fold_left (fun acc (idx, (vid, vtyp)) -> 
-      let param_stack = aux_build_alloca vid vtyp fun_ibuilder in
-      let param = Llvm.param fun_def idx in
-      let _ = Llvm.build_store param param_stack fun_ibuilder in 
-      Symbol_table.add_entry vid param_stack acc
-    ) fun_st (Mcomp_stdlib.list_zip_with_index formals) in
-    (* Evaluate statement. *)
     let fun_env = {
       fsym_table = fun_st; 
       fun_def = fun_def; 
       current_module = current_module;
       ibuilder = fun_ibuilder; 
+      latest_alloca_instr = None;
     } in
+    (* Allocate and store function paramaters inside the stack. *)
+    let fun_st = List.fold_left (fun acc (idx, (vid, vtyp)) -> 
+      let param_stack = aux_build_alloca vid vtyp fun_env in
+      let param = Llvm.param fun_def idx in
+      let _ = Llvm.build_store param param_stack fun_ibuilder in 
+      Symbol_table.add_entry vid param_stack acc
+    ) fun_st (Mcomp_stdlib.list_zip_with_index formals) in
+    (* Evaluate statement. *)
+    let fun_env = { fun_env with fsym_table = fun_st; } in
     let _ = eval_stmt body fun_env in 
     let _ = remove_useless_returns fun_env in
     let _ = unify_blocks rtype fun_env in
@@ -557,6 +578,7 @@ and eval_member_decl node comp_env decl_st =
       fun_def = (fst comp_env.global_env.global_var_init); 
       ibuilder = builder; 
       current_module = current_module;
+      latest_alloca_instr = None;
     } in
     let global_value = eval_exp exp fun_env in
     ignore(Llvm.build_store global_value global_var builder);
