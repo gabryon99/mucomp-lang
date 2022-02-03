@@ -44,7 +44,8 @@
       raise (Lexing_error (Location.to_lexeme_position lexbuf, msg))
   
   let check_num_float32 num lexbuf =
-     if (abs_float num) > Float.max_float then
+    let t = (Int32.float_of_bits (Int32.bits_of_float num)) in
+     if t = infinity || t = 0. then
       let msg = Printf.sprintf "The number \"%f\" is not a 32 bit floating point number!\n" num in 
       raise (Lexing_error (Location.to_lexeme_position lexbuf, msg))
     else
