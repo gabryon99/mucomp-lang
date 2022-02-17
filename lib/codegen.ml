@@ -604,14 +604,14 @@ and eval_component_decl comp_node temp_st global_env =
   let current_module = global_env.global_module in
   match comp_node.Ast.node with
   | Ast.ComponentDecl({cname; provides; definitions; _}) ->
-    let is_main_component = (List.mem "App" provides) in
+    let is_main_component = (List.mem Mcomp_stdlib.g_APP_ID provides) in
     let comp_env = {cname = cname; is_main = is_main_component; current_module = current_module; global_env = global_env} in
     let _ = List.iter (fun m -> eval_member_decl m comp_env temp_st) definitions in ()
 
 and declare_component node current_module acc =
   match node.Ast.node with
   | Ast.ComponentDecl({cname; provides; definitions; _}) ->
-    let is_main_component = (List.mem "App" provides) in
+    let is_main_component = (List.mem Mcomp_stdlib.g_APP_ID provides) in
     (* First declare the component members ... *)
     List.fold_left (fun acc m -> declare_component_members m cname is_main_component current_module acc) acc definitions
 
