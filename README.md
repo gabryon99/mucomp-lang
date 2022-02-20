@@ -6,6 +6,10 @@
 
 μcomp-lang is a didactic language implemented for *Language, Compilers and Iterpreters* course at **UniPi**.
 
+### Report
+
+Read the report `mucomp-report.pdf` inside `asset` folder if you are interested to how mucomp-lang is implemented
+
 ### Example
 
 The snippet below shows a simple program written in μcomp.
